@@ -39,12 +39,28 @@ Legend: `[x]` done and verified · `[~]` done, verification pending · `[ ]` not
 
 ## Phase 1 — Pools
 
-- [ ] **Create `data` pool — ZFS mirror, 2× 2TB SATA SSD**
+- [x] **Create `data` pool — ZFS mirror, 2× 2TB SATA SSD**
       Devices: `ata-WDC_WDS200T1R0A-68A4W0_234542800604` +
       `ata-Seagate_IronWolf_ZA2000NM10002-3R1103_70W003LZ`
-      **Verification (required, see D1):** `zpool status data` must show a
-      `mirror-0` vdev with both devices under it. A flat list of two devices
-      means a *stripe* — wrong, and must be destroyed and recreated.
+
+      Pre-format intent is recorded by Unraid 7.x in `/boot/config/pools/data.cfg`
+      (`diskFsProfile="mirror"`, `diskFsWidth="2"`) — worth checking *before*
+      formatting, since the topology is committed at format time.
+
+      *Verified (see D1), two independent ways:*
+      1. `zpool status data` shows a `mirror-0` vdev with **both devices nested
+         under it**. A stripe lists devices flat, directly beneath the pool name.
+      2. `zpool list data` reports `SIZE 1.81T` from 2× 2TB. A stripe would show
+         ~3.6T — half the raw capacity is the redundancy.
+
+      Pool properties confirmed: `compression=on` (lz4), `autotrim=on`,
+      `atime=off`, `ONLINE` with no errors, mounted at `/mnt/data`.
+
+      Compression was enabled **before** formatting deliberately: ZFS only
+      compresses data written after the setting is applied, so enabling it later
+      would leave everything written before then uncompressed. Matters here
+      because this pool holds `appdata` (Immich's Postgres), which compresses
+      well; photos are already-compressed and lz4 early-aborts on them.
 
 - [ ] **Create `scratch` pool — XFS, single NVMe**
       Device: `nvme-ShiJi_128GB_M.2-NVMe_AA00000000035`
