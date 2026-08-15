@@ -150,3 +150,93 @@ templates documenting every required variable.
 in the repo and make a from-git rebuild fully self-contained. Better in principle,
 but it adds an age key that itself must be backed up and managed. For a single
 home server the simpler scheme wins. Revisit if this ever grows to several hosts.
+
+---
+
+## D10 — Power: full shutdown + Wake-on-LAN, orchestrated by `fastpi`
+
+The server is **powered off by default** and woken on demand with a WoL magic
+packet. `fastpi` — an always-on Raspberry Pi already on the LAN — owns the
+schedule and acts as the orchestrator: it wakes the server, runs the job over
+SSH, and powers it back down.
+
+This moves the always-on power budget from the x86 box to a ~2 W Pi.
+
+### Measured power, not estimated
+
+**Idle draw at the wall: 25.1 W** (measured 2026-08-16, HDD not yet spun down).
+An earlier estimate of ~15 W was wrong — the real figure is roughly 65% higher,
+which makes the case for powering off considerably stronger.
+
+| Scenario | Annual | At €0.30/kWh |
+|---|---|---|
+| Always on @ 25.1 W | 220 kWh | **~€66/yr** |
+| Off by default, ~2 h/day awake | ~30 kWh | **~€9/yr** |
+| **Saving** | **~190 kWh** | **~€57/yr** |
+
+Two further reductions available on top, both independent of the wake/sleep
+design:
+
+- **HDD spin-down** (D3 / `00-hardware.md`) — roughly 3 W while parked, so idle
+  should fall to ~22 W once the one-hour delay is in effect.
+- **CPU governor** is currently `performance`, which pins clocks high for no
+  benefit on a NAS. `powersave` should recover another 1–3 W.
+
+Re-measure after both are applied; the always-on baseline is the number the
+whole calculation hangs on.
+
+### Why not sleep, and why not hibernate
+
+**Hibernation is architecturally impossible on Unraid.** The root filesystem runs
+entirely in RAM and there is no swap device; `/sys/power/disk` reports no
+hibernation target. There is nowhere to write a memory image. Not a config gap.
+
+**S3 suspend-to-RAM was rejected.** The kernel does offer it (`/sys/power/state`
+= `freeze mem`), but Unraid's S3 support is historically unreliable, and this
+machine's NIC is `igc` (Intel I225/I226), a family with a track record of
+suspend/resume and link-negotiation quirks. A clean shutdown and cold boot has no
+resume state to corrupt. This matches prior experience on the `beefy` host, where
+shutdown proved more reliable than sleep.
+
+### Why the scheduler must live off-box
+
+Unraid's cron does not run while the machine is off, and does **not** catch up
+missed jobs on next boot. A backup schedule owned by the server itself would
+therefore fail silently the moment power saving is enabled — the exact class of
+invisible failure D7 exists to prevent. Putting the schedule on `fastpi` makes
+"the server was off" a condition the scheduler can detect and alert on.
+
+### Prerequisites
+
+- **Array auto-start must be enabled.** Default is `startArray="no"`, meaning the
+  array does not mount after a cold boot — every woken backup would find no
+  filesystem. This is the single most important prerequisite.
+- **BIOS: ErP / EuP mode must be DISABLED.** ErP cuts standby power to the NIC
+  and breaks wake-from-off entirely. It is the most common reason WoL "doesn't
+  work" after a full shutdown.
+- **BIOS: PCIe Power On / PME must be ENABLED.**
+- `ethtool eth0` must report `Wake-on: g` after a cold boot. It is currently the
+  driver default; if a future update changes that, persist it via `/boot/config/go`.
+- Clean shutdown must use `/usr/local/sbin/powerdown`, which stops the array,
+  unmounts, and exports the ZFS pool. Never `poweroff` directly.
+
+### Known trade-offs, accepted
+
+- **Boot latency ~60–120 s.** Interactive access uses the same pattern already in
+  use for `beefy`: an SSH `Match … exec` hook fires the wake, with
+  `ConnectionAttempts` high enough to retry while the machine boots.
+- **A web service cannot wake the box by being visited.** If a photo app is ever
+  exposed for family, a request to a powered-off server simply fails. That would
+  need an always-on reverse proxy on `fastpi` that fires the magic packet and
+  then proxies once the host answers.
+- **Shutdown must not interrupt an active user.** The power-down job has to check
+  for live SMB and SSH sessions before pulling the plug, rather than shutting down
+  on a fixed timer.
+- **Extra start/stop cycles on the HDD.** Negligible: a few hundred per year
+  against a drive rated for tens of thousands.
+
+### Sequencing
+
+Implement **after** backups are running and verified. Adding power management
+first makes a missing backup ambiguous — broken script, or sleeping box? Prove
+the jobs work on an always-on machine, then introduce the power saving.
