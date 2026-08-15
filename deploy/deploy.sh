@@ -59,6 +59,24 @@ if [[ -d "${REPO_ROOT}/scripts/lib" ]]; then
     "${HOST}:/boot/config/scripts/lib/"
 fi
 
+# User Scripts stores job schedules in a single schedule.json, NOT in the job
+# directories. Deploying the scripts without it restores jobs that never run -
+# a silent failure, since a job with no schedule looks identical to a healthy
+# one until you notice it has produced nothing. It is a single shared file
+# covering every job, so pushing a stale copy would drop schedules for jobs
+# created through the webGUI. Opt in with DEPLOY_SCHEDULES=1.
+SCHEDULE_JSON="/boot/config/plugins/user.scripts/schedule.json"
+if [[ "${DEPLOY_SCHEDULES:-0}" == "1" && -f "${REPO_ROOT}/config/user-scripts/schedule.json" ]]; then
+  echo ">>> deploying User Scripts schedules -> ${SCHEDULE_JSON}"
+  if [[ -z "$DRY" ]]; then
+    ssh "$HOST" "cp -f '${SCHEDULE_JSON}' '${SCHEDULE_JSON}.bak' 2>/dev/null || true"
+    scp -q "${REPO_ROOT}/config/user-scripts/schedule.json" "${HOST}:${SCHEDULE_JSON}"
+    echo "    NOTE: schedules are re-read on array start or plugin page save."
+  fi
+else
+  echo ">>> skipping User Scripts schedules (set DEPLOY_SCHEDULES=1 to include)"
+fi
+
 # Shares are only pushed deliberately: overwriting a live share .cfg with a stale
 # copy can silently change where data is written. Requires DEPLOY_SHARES=1.
 if [[ "${DEPLOY_SHARES:-0}" == "1" && -d "${REPO_ROOT}/config/shares" ]]; then

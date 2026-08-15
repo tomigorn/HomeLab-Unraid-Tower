@@ -37,6 +37,13 @@ rsync -av -e ssh \
   --include='authorized_keys' --include='*.pub' --include='*/' --exclude='*' \
   "${HOST}:/boot/config/ssh/" "${REPO_ROOT}/config/ssh/" 2>/dev/null || echo "   (none yet)"
 
+echo ">>> User Scripts schedules"
+# Job schedules live in this one file, not in the job directories. Without it a
+# rebuild restores scripts that silently never run.
+mkdir -p "${REPO_ROOT}/config/user-scripts"
+scp -q "${HOST}:/boot/config/plugins/user.scripts/schedule.json" \
+       "${REPO_ROOT}/config/user-scripts/schedule.json" 2>/dev/null || echo "   (none yet)"
+
 echo ">>> go file"
 scp -q "${HOST}:/boot/config/go" "${REPO_ROOT}/config/go" 2>/dev/null || echo "   (none)"
 
