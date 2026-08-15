@@ -1,0 +1,28 @@
+# ---- secrets: never commit real values ----
+secrets/*
+!secrets/*.example
+!secrets/README.md
+
+# rclone / restic / duplicacy configs contain credentials
+**/rclone.conf
+**/*.key
+!**/*.pub
+
+# ---- Unraid artifacts that must not be version-controlled ----
+# Licence key is bound to the flash GUID and is not ours to distribute
+*.key
+Trial.key
+
+# Private SSH keys (public keys are fine and are committed)
+config/ssh/**/id_*
+!config/ssh/**/*.pub
+config/ssh/**/ssh_host_*
+!config/ssh/**/ssh_host_*.pub
+
+# super.dat is a binary blob of array assignments; documented in docs/ instead
+super.dat
+
+# ---- local noise ----
+*.swp
+*.tmp
+.DS_Store
