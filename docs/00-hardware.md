@@ -61,10 +61,44 @@ with no console error beyond the link-down banner. Recovery is either to re-enab
 the port in BIOS, or to `rm /boot/config/network-rules.cfg` and reboot so Unraid
 re-enumerates.
 
-## BIOS settings — TODO
+## Power management — VERIFIED WORKING
 
-Not yet applied. Both matter for a headless box in a closet:
+Wake-on-LAN from a full power-off (S5) is **tested and working**. This is the
+foundation of D10, so it was proven before anything was built on top of it.
 
-- [ ] **Restore on AC Power Loss → Power On** — otherwise the server stays dark
-      after any power cut or move until someone presses the button physically.
-- [ ] **Wake-on-LAN** — so it can be started from the workstation.
+Measured cycle, 2026-08-16:
+
+| Stage | Result |
+|---|---|
+| Clean shutdown (`/usr/local/sbin/powerdown`) | array stopped, ZFS exported |
+| Full power-off confirmed | 45 s of no ping response |
+| Magic packet → SSH reachable | **80 s** |
+| Magic packet → array `STARTED` | **~85 s** |
+| ZFS mirror after cold boot | `ONLINE`, `mirror-0`, 0 errors |
+| Both mounts present | `/mnt/data`, `/mnt/disk1` |
+
+Settings that survived the cold boot, all confirmed:
+
+- `ethtool eth0` → `Wake-on: g` — **the driver re-enables this by default, so no
+  `/boot/config/go` entry is needed.** Re-check after any Unraid upgrade.
+- `startArray="yes"` — array auto-starts unattended
+- `diskSpindownDelay.1="1"` — 1 hour on the HDD
+- `UDMA_CRC_Error_Count` still 0 after the power cycle
+- `Start_Stop_Count` 263 → 265 (+2 for the cycle; irrelevant against the drive's
+  rating)
+
+Wake command: `./scripts/wake-tower.sh` — sends the magic packet as a UDP
+broadcast and waits for SSH.
+
+**Budget ~90 seconds from magic packet to a usable, fully mounted server.**
+
+### BIOS
+
+- [x] Wake-from-off enabled (exact menu labels vary by board; the settings were
+      located and applied, and the behaviour is verified above, which is what
+      matters). If WoL ever stops working, suspect **ErP / EuP mode** having been
+      re-enabled — it cuts NIC standby power and silently breaks wake-from-off.
+- [ ] **Restore on AC Power Loss → Power On** — still worth setting so a power
+      cut does not leave the machine dark. Note this is *independent* of WoL:
+      WoL wakes it on demand, but only this brings it back by itself after an
+      outage.

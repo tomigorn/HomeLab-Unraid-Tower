@@ -132,9 +132,33 @@ All exclusive (Secondary storage = none) — see D4.
 
 ---
 
-## Phase 7 — BIOS
+## Phase 7 — Power management (D10)
 
-See `00-hardware.md`.
+See `00-hardware.md` for the measured wake cycle.
 
-- [ ] Restore on AC Power Loss → Power On
-- [ ] Wake-on-LAN enabled
+- [x] **Array auto-start enabled** (`startArray="yes"`)
+      Prerequisite for everything else: without it a woken server boots with
+      nothing mounted, and scheduled jobs would run against empty mountpoints
+      and report success having copied nothing.
+
+- [x] **HDD spin-down: 1 hour on Disk 1 only**
+      Global default left at `never` so the SSDs are untouched.
+
+- [x] **Wake-on-LAN from full power-off — TESTED END TO END**
+      Clean shutdown → confirmed off → magic packet → SSH at 80 s → array
+      `STARTED` at ~85 s → ZFS mirror `ONLINE` with 0 errors, both mounts
+      present. `Wake-on: g` re-enabled by the driver on cold boot, so no `go`
+      file entry is required.
+
+- [ ] Restore on AC Power Loss → Power On (independent of WoL — this is what
+      recovers the machine after a power cut with nobody present)
+
+- [ ] CPU governor `performance` → `powersave` (Tips and Tweaks plugin)
+
+- [ ] Re-measure idle draw once the HDD has parked and the governor is changed.
+      Baseline: **25.1 W** at idle with the HDD spinning.
+
+- [ ] **fastpi orchestration** — implement only after backups are proven working
+      on an always-on machine (see D10 sequencing). fastpi wakes the server, runs
+      the job over SSH, checks for active SMB/SSH sessions, then powers down.
+      Must alert if the wake fails, or a missed backup is invisible.
