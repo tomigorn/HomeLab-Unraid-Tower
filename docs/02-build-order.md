@@ -62,8 +62,10 @@ Legend: `[x]` done and verified · `[~]` done, verification pending · `[ ]` not
       because this pool holds `appdata` (Immich's Postgres), which compresses
       well; photos are already-compressed and lz4 early-aborts on them.
 
-- [ ] **Create `scratch` pool — XFS, single NVMe**
-      Device: `nvme-ShiJi_128GB_M.2-NVMe_AA00000000035`
+- [x] ~~**Create `scratch` pool — XFS, single NVMe**~~ — **dropped, see D2**
+      The NVMe (`nvme-ShiJi_128GB_M.2-NVMe_AA00000000035`) is left **unassigned**.
+      No media server and no download client means the pool had no workload to
+      justify it. Can be added later without disturbing anything.
 
 - [ ] **Assign 6TB as array Disk 1, XFS**
       Device: `ata-WDC_WD60EFAX-68JH4N0_WD-WX42D80C4RAP`

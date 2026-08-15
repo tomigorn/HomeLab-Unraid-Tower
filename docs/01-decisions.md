@@ -27,13 +27,31 @@ must show a `mirror-0` vdev containing both devices.
 
 **Device:** ShiJi 128GB M.2 NVMe (unbranded)
 
-Holds only rebuildable data: download temp, transcode cache. No redundancy,
-because nothing on it is worth protecting. If it dies, nothing is lost — replace
-the disk and recreate the shares.
+**Status: DROPPED 2026-08-16. The NVMe is left unassigned.**
 
-Deliberately *not* used for appdata (see D1) and deliberately not part of the
-`data` mirror (mixing an unbranded NVMe into the pool holding the photos would
-put the pool's reliability at the mercy of its weakest member).
+The original plan was a single-device XFS pool holding download temp and
+transcode cache. That was dropped because **the workload it existed for does not
+exist**: this server is a NAS / personal cloud only — no Plex, no Jellyfin, no
+download client. Both justifications disappear with them.
+
+What remained was marginal — Docker image layers (small and re-pullable) and
+Immich's occasional video transcoding. Neither justifies a pool on its own,
+because a pool that is not needed is still a pool that can fail, raise alerts,
+and appear in every health check.
+
+Two further reasons not to build a dependency on this disk:
+
+- It is unbranded, and its serial (`AA00000000035`) follows a placeholder pattern
+  typical of low-quality no-name drives. Acceptable for data you can afford to
+  lose; not something to rely on.
+- `appdata` was already excluded from it by D1, so its most valuable potential
+  use was off the table anyway.
+
+Nothing is lost by waiting — a pool can be added at any time without disturbing
+existing pools or data.
+
+**Revisit if:** a download client is added, or Immich video transcoding turns out
+to cause meaningful write wear on the `data` mirror.
 
 ---
 
