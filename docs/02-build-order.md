@@ -150,7 +150,7 @@ See `00-hardware.md` for the measured wake cycle.
       present. `Wake-on: g` re-enabled by the driver on cold boot, so no `go`
       file entry is required.
 
-- [~] **Idle auto power-off watchdog** — `scripts/user-scripts/idle-shutdown/`
+- [x] **Idle auto power-off watchdog** — `scripts/user-scripts/idle-shutdown/`
       Powers off after **30 minutes** with no SSH/SMB/NFS connections, console
       logins, running data jobs (rsync/rclone/restic/duplicacy/syncoid), array
       resync, ZFS scrub, SMART self-test, or disk writes. Runs `*/5`, and is
@@ -181,8 +181,24 @@ See `00-hardware.md` for the measured wake cycle.
       survives reboots until removed. Use during maintenance, long copies, or
       while working in the webGUI.
 
-      - [ ] Install the **User Scripts** plugin (not yet present)
-      - [ ] Deploy via `./deploy/deploy.sh` and set schedule to `*/5 * * * *`
+      - [x] User Scripts plugin installed
+      - [x] Deployed via `./deploy/deploy.sh`, scheduled `*/5 * * * *`,
+            cron entry confirmed in `/etc/cron.d/root`
+      - [x] **Schedule captured in the repo** at
+            `config/user-scripts/schedule.json` — User Scripts keeps schedules
+            in one shared file, *not* in the job directories, so without this a
+            rebuilt flash would restore jobs that silently never run
+
+      *Observed running from cron and behaving correctly:*
+      ```
+      01:45:02  BUSY - sdb wrote 128 sectors (SMR settle)
+      01:50:01  BUSY - 1 SSH connection(s)
+      ```
+      The 128-sector write was traced to XFS flushing metadata after a test
+      file was created and deleted — **not** a recurring writer. Verified by
+      sampling `/proc/diskstats` once a minute for six minutes with the system
+      untouched: zero writes throughout. The strict zero-write SMR guard is
+      therefore achievable in practice and does not need loosening.
 
 - [ ] Restore on AC Power Loss → Power On (independent of WoL — this is what
       recovers the machine after a power cut with nobody present)
