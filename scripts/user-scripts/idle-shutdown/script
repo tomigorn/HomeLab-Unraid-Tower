@@ -1,0 +1,175 @@
+#!/bin/bash
+#
+# Idle-shutdown watchdog (decision D10).
+#
+# Powers the server off after a sustained idle period so it spends most of its
+# life at ~1 W instead of ~25 W. It is woken again on demand with a Wake-on-LAN
+# magic packet (see scripts/wake-tower.sh) or on a schedule by fastpi.
+#
+# Run this from User Scripts on a */5 * * * * schedule. It is a *stateful*
+# check: it must see IDLE_MINUTES worth of consecutive idle results before it
+# acts, so a single quiet moment never triggers a shutdown.
+#
+# To stop it shutting the machine down (maintenance, long copy, guests using
+# it), create the inhibit file:
+#
+#     touch /boot/config/no-autoshutdown
+#
+# That lives on the flash, so it survives reboots until you remove it.
+
+set -uo pipefail
+
+# ---------------------------------------------------------------- configuration
+IDLE_MINUTES=30                 # required consecutive idle time before poweroff
+CHECK_INTERVAL_MINUTES=5        # must match the cron schedule
+INHIBIT_FILE="/boot/config/no-autoshutdown"
+STATE_FILE="/var/tmp/idle-shutdown.state"
+LOG_TAG="idle-shutdown"
+
+# Disks watched for activity. The HDD is listed first and treated strictly.
+HDD="sdb"                       # WD60EFAX 6TB - SMR, needs special handling
+SSDS="sdc sdd"                  # data pool mirror members
+
+# SSDs see minor housekeeping writes even when nothing is happening, so allow a
+# small delta. The SMR HDD must be at *exactly* zero writes (see below).
+SSD_SECTOR_THRESHOLD=2048       # ~1 MiB of 512-byte sectors per check window
+
+REQUIRED_IDLE_CHECKS=$(( IDLE_MINUTES / CHECK_INTERVAL_MINUTES ))
+
+[[ -r /boot/config/scripts/lib/notify.sh ]] && . /boot/config/scripts/lib/notify.sh
+
+log() { logger -t "$LOG_TAG" "$1"; echo "$(date '+%F %T') $1"; }
+
+# ------------------------------------------------------------------- busy checks
+# Each check appends to $reasons if the system is doing something. Any single
+# reason resets the idle counter to zero.
+reasons=()
+
+# 1. Manual inhibit -----------------------------------------------------------
+if [[ -f "$INHIBIT_FILE" ]]; then
+  reasons+=("inhibit file present ($INHIBIT_FILE)")
+fi
+
+# 2. Live client connections --------------------------------------------------
+# Counted from established TCP connections, NOT from `who`. A non-interactive
+# `ssh host 'cmd'` allocates no PTY and creates no utmp entry, so `who` reports
+# zero while an admin is actively working - which would let this script power
+# the machine off underneath them. Verified on this system: `who` said 0 while
+# `ss` correctly showed the connection.
+#
+# HTTP (80/443) is deliberately NOT counted. A browser keeps webGUI connections
+# alive on a background tab indefinitely, and counting them would mean a tab
+# left open six weeks ago silently disables all power saving. Use the inhibit
+# file while doing webGUI maintenance.
+check_port() { # check_port <port> <label>
+  local n
+  n=$(ss -tnH state established "( sport = :$1 )" 2>/dev/null | wc -l)
+  (( n > 0 )) && reasons+=("${n} ${2} connection(s)")
+}
+check_port 22   SSH
+check_port 445  SMB
+check_port 139  SMB
+check_port 2049 NFS
+
+# Console / PTY logins still matter, and `who` is the right tool for those.
+tty_sessions=$(who 2>/dev/null | wc -l)
+(( tty_sessions > 0 )) && reasons+=("${tty_sessions} console session(s)")
+
+# Samba's own view, as a backstop for a client holding a share open.
+smb=$(smbstatus -b 2>/dev/null | grep -cE '^[0-9]+' || true)
+(( smb > 0 )) && reasons+=("${smb} SMB session(s)")
+
+# 4. Long-running data jobs ---------------------------------------------------
+for proc in rsync rclone restic duplicacy syncoid zfs-send; do
+  if pgrep -x "$proc" >/dev/null 2>&1; then
+    reasons+=("${proc} running")
+  fi
+done
+
+# 5. Array resync / parity operation ------------------------------------------
+resync=$(grep -oP 'mdResync="\K[0-9]+' /var/local/emhttp/var.ini 2>/dev/null || echo 0)
+[[ "${resync:-0}" != "0" ]] && reasons+=("array resync in progress")
+
+# 6. ZFS scrub ----------------------------------------------------------------
+if zpool status 2>/dev/null | grep -qi "scrub in progress"; then
+  reasons+=("zfs scrub in progress")
+fi
+
+# 7. SMART self-test ----------------------------------------------------------
+# Never cut power during a self-test: it aborts the test and, on a 6TB SMR
+# drive, that is hours of work discarded.
+for d in $HDD $SSDS; do
+  if smartctl -c "/dev/$d" 2>/dev/null | grep -qi "of test remaining\|in progress"; then
+    reasons+=("SMART self-test running on $d")
+  fi
+done
+
+# 8. Disk I/O since the previous check ----------------------------------------
+# Field 3 = device, field 6 = sectors read, field 10 = sectors written.
+read_counters() {
+  awk '$3 ~ /^(sdb|sdc|sdd|nvme0n1)$/ {print $3"="$6","$10}' /proc/diskstats | tr '\n' ' '
+}
+now_counters=$(read_counters)
+
+get_val() { # get_val "<counters>" <dev> <r|w>
+  local blob="$1" dev="$2" which="$3" pair
+  pair=$(echo "$blob" | tr ' ' '\n' | grep "^${dev}=" | cut -d= -f2)
+  [[ -z "$pair" ]] && { echo 0; return; }
+  if [[ "$which" == "r" ]]; then echo "${pair%%,*}"; else echo "${pair##*,}"; fi
+}
+
+prev_counters=""
+prev_count=0
+if [[ -f "$STATE_FILE" ]]; then
+  prev_count=$(sed -n '1p' "$STATE_FILE")
+  prev_counters=$(sed -n '2p' "$STATE_FILE")
+fi
+prev_count=${prev_count:-0}
+
+if [[ -n "$prev_counters" ]]; then
+  # The SMR drive is held to zero writes. After a write burst an SMR disk
+  # reorganises its CMR media cache into shingled zones during idle time, and
+  # that work is not visible as host I/O. Requiring a full IDLE_MINUTES window
+  # with no writes at all gives it an uninterrupted settle period before power
+  # is cut. An interrupted reorganisation is not data loss - it resumes on next
+  # spin-up - but it costs write performance later, so it is worth avoiding.
+  hdd_w_now=$(get_val "$now_counters" "$HDD" w)
+  hdd_w_old=$(get_val "$prev_counters" "$HDD" w)
+  hdd_delta=$(( hdd_w_now - hdd_w_old ))
+  (( hdd_delta > 0 )) && reasons+=("${HDD} wrote ${hdd_delta} sectors (SMR settle)")
+
+  for d in $SSDS; do
+    w_now=$(get_val "$now_counters" "$d" w)
+    w_old=$(get_val "$prev_counters" "$d" w)
+    delta=$(( w_now - w_old ))
+    (( delta > SSD_SECTOR_THRESHOLD )) && reasons+=("${d} wrote ${delta} sectors")
+  done
+fi
+
+# --------------------------------------------------------------------- decision
+if (( ${#reasons[@]} > 0 )); then
+  printf '%s\n%s\n' 0 "$now_counters" > "$STATE_FILE"
+  log "BUSY - counter reset. Reasons: ${reasons[*]}"
+  exit 0
+fi
+
+count=$(( prev_count + 1 ))
+printf '%s\n%s\n' "$count" "$now_counters" > "$STATE_FILE"
+
+idle_for=$(( count * CHECK_INTERVAL_MINUTES ))
+log "idle for ${idle_for}m (${count}/${REQUIRED_IDLE_CHECKS} checks)"
+
+if (( count < REQUIRED_IDLE_CHECKS )); then
+  exit 0
+fi
+
+# ------------------------------------------------------------------- power down
+log "idle threshold reached (${IDLE_MINUTES}m) - powering down"
+if declare -F notify_send >/dev/null; then
+  notify_send normal "Auto power-off" \
+    "Idle ${IDLE_MINUTES}m with no sessions, jobs or disk writes. Wake with a WoL magic packet."
+fi
+rm -f "$STATE_FILE"
+
+# powerdown (not poweroff) stops the array, unmounts, and exports the ZFS pool.
+exec /usr/local/sbin/powerdown

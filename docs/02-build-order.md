@@ -150,6 +150,40 @@ See `00-hardware.md` for the measured wake cycle.
       present. `Wake-on: g` re-enabled by the driver on cold boot, so no `go`
       file entry is required.
 
+- [~] **Idle auto power-off watchdog** — `scripts/user-scripts/idle-shutdown/`
+      Powers off after **30 minutes** with no SSH/SMB/NFS connections, console
+      logins, running data jobs (rsync/rclone/restic/duplicacy/syncoid), array
+      resync, ZFS scrub, SMART self-test, or disk writes. Runs `*/5`, and is
+      stateful — six consecutive idle checks are required, so a single quiet
+      moment never triggers a shutdown.
+
+      *Logic verified on the live system before scheduling:*
+      - Detects an active admin SSH session (see the `who` bug below)
+      - Detects an 8 MiB write to the SMR disk (16,480 sectors) and resets
+
+      **Two design details that were bugs first:**
+
+      1. **Sessions are counted with `ss`, not `who`.** A non-interactive
+         `ssh host 'cmd'` allocates no PTY and creates no utmp entry, so `who`
+         reported **0 while an admin was actively connected** — the first
+         version would have powered the machine off underneath a live session.
+      2. **HTTP (80/443) is deliberately not counted.** Browsers hold webGUI
+         connections open on background tabs indefinitely; counting them would
+         mean one forgotten tab silently disables all power saving.
+
+      **SMR guard:** the HDD must show *exactly zero* sectors written for the
+      full 30-minute window. After a write burst an SMR drive reorganises its
+      CMR media cache into shingled zones during idle, and that work is not
+      visible as host I/O. An interrupted reorganisation is not data loss (it
+      resumes on next spin-up) but it costs write performance later.
+
+      **Inhibit:** `touch /boot/config/no-autoshutdown` — on the flash, so it
+      survives reboots until removed. Use during maintenance, long copies, or
+      while working in the webGUI.
+
+      - [ ] Install the **User Scripts** plugin (not yet present)
+      - [ ] Deploy via `./deploy/deploy.sh` and set schedule to `*/5 * * * *`
+
 - [ ] Restore on AC Power Loss → Power On (independent of WoL — this is what
       recovers the machine after a power cut with nobody present)
 
