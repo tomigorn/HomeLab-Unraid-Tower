@@ -67,11 +67,20 @@ Legend: `[x]` done and verified · `[~]` done, verification pending · `[ ]` not
       No media server and no download client means the pool had no workload to
       justify it. Can be added later without disturbing anything.
 
-- [ ] **Assign 6TB as array Disk 1, XFS**
+- [x] **Assign 6TB as array Disk 1, XFS**
       Device: `ata-WDC_WD60EFAX-68JH4N0_WD-WX42D80C4RAP`
-      No parity disk (see D3).
+      No parity disk (see D3) — Parity and Parity 2 left `DISK_NP`.
 
-- [ ] **Start array**
+      Note: Unraid's Array Devices **Slots** count includes the two parity
+      positions, so the minimum selectable value is `3` (parity + parity2 +
+      disk1). Empty slots are harmless and do not count toward the licence
+      device limit, which counts attached devices.
+
+      *Verified:* mounted `/dev/md1p1` as XFS at `/mnt/disk1`, 5.5T. The 108G
+      `df` reports on the empty filesystem is XFS metadata (`agcount=6` with
+      `rmapbt` and `reflink`), not data — `du` confirms it is empty.
+
+- [x] **Start array** — `mdState="STARTED"`, `fsState="Started"`
 
 ---
 
