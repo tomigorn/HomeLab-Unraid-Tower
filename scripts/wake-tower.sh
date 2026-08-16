@@ -17,6 +17,12 @@ set -uo pipefail
 
 MAC="${TOWER_MAC:-60:be:b4:17:0d:e0}"
 HOST="${TOWER_HOST:-tower}"
+# Readiness is polled by IP, never by hostname. When the server is off the
+# router drops its DNS entry as the DHCP lease expires, so `tower` stops
+# resolving - precisely when this script runs. Polling the name would then fail
+# even though the wake itself succeeded (observed: the machine was up and
+# serving while this script reported "did not come up within 180s").
+IP="${TOWER_IP:-192.168.1.101}"
 BCAST="${TOWER_BCAST:-192.168.1.255}"
 TIMEOUT="${WAKE_TIMEOUT:-180}"
 
@@ -38,8 +44,9 @@ print(f"magic packet sent to {mac} via {bcast}:9,7")
 PY
 }
 
-if ssh -o BatchMode=yes -o ConnectTimeout=3 "$HOST" true 2>/dev/null; then
-  echo "${HOST} is already up"
+# Cheap layer-3 check first - no DNS, no SSH keys, no host-key prompts.
+if ping -c1 -W2 "$IP" >/dev/null 2>&1; then
+  echo "${HOST} (${IP}) is already up"
   exit 0
 fi
 
@@ -48,16 +55,37 @@ send_magic_packet || exit 1
 
 [[ "${1:-}" == "--no-wait" ]] && exit 0
 
-echo "waiting up to ${TIMEOUT}s for SSH..."
 start=$SECONDS
-while (( SECONDS - start < TIMEOUT )); do
-  if ssh -o BatchMode=yes -o ConnectTimeout=3 "$HOST" true 2>/dev/null; then
-    echo "${HOST} is up after $(( SECONDS - start ))s"
-    exit 0
-  fi
+
+echo "waiting for network (up to ${TIMEOUT}s)..."
+until ping -c1 -W2 "$IP" >/dev/null 2>&1; do
+  (( SECONDS - start >= TIMEOUT )) && {
+    echo "!! ${IP} did not respond within ${TIMEOUT}s" >&2
+    echo "   check: BIOS ErP/EuP disabled, PCIe Power On enabled," >&2
+    echo "          and 'ethtool eth0' reporting Wake-on: g" >&2
+    exit 1
+  }
+  sleep 5
+done
+echo "  network up after $(( SECONDS - start ))s"
+
+echo "waiting for SSH..."
+until (ping -c1 -W2 "$IP" >/dev/null 2>&1 && \
+       ssh -o BatchMode=yes -o ConnectTimeout=4 -o StrictHostKeyChecking=accept-new \
+           -i ~/.ssh/tower -o IdentitiesOnly=yes "root@${IP}" true 2>/dev/null); do
+  (( SECONDS - start >= TIMEOUT )) && { echo "!! SSH never came up" >&2; exit 1; }
+  sleep 5
+done
+echo "  ssh up after $(( SECONDS - start ))s"
+
+# SSH answers roughly 5s BEFORE the array finishes mounting. Anything that runs
+# a job against /mnt must wait for this, or it operates on empty mountpoints and
+# reports success having copied nothing.
+echo "waiting for the array to mount..."
+until ssh -o BatchMode=yes -o ConnectTimeout=4 -i ~/.ssh/tower -o IdentitiesOnly=yes \
+        "root@${IP}" 'grep -q "mdState=\"STARTED\"" /var/local/emhttp/var.ini' 2>/dev/null; do
+  (( SECONDS - start >= TIMEOUT )) && { echo "!! array did not start within ${TIMEOUT}s" >&2; exit 1; }
   sleep 5
 done
 
-echo "!! ${HOST} did not come up within ${TIMEOUT}s" >&2
-echo "   check: BIOS ErP/EuP disabled, PCIe Power On enabled, 'ethtool eth0' shows Wake-on: g" >&2
-exit 1
+echo "${HOST} ready after $(( SECONDS - start ))s (array STARTED, mounts available)"
