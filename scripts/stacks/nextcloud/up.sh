@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+#
+# Bring up the Nextcloud stack: PostgreSQL + Redis + Nextcloud.
+#
+# Unraid ships no `docker compose`, so this is plain `docker run`. It is
+# idempotent: re-running recreates the containers from these definitions. All
+# state lives in bind mounts on the ZFS pool, so recreating a container loses
+# nothing - that is the point. To change a setting, edit here and re-run.
+#
+# Run ON THE SERVER:  /boot/config/scripts/stacks/nextcloud/up.sh
+# Or from the repo:   ssh tower '/boot/config/scripts/stacks/nextcloud/up.sh'
+
+set -euo pipefail
+
+SECRETS="/boot/config/secrets/nextcloud.env"
+[[ -r "$SECRETS" ]] || { echo "!! missing $SECRETS" >&2; exit 1; }
+set -a; . "$SECRETS"; set +a
+
+NET="nextcloud"
+APPDATA="/mnt/user/appdata"
+NC_DATA="/mnt/user/nextcloud"       # user files - its own ZFS dataset
+HTTP_PORT="8080"                    # host port; reverse proxy will front this later
+
+PG_IMAGE="postgres:16-alpine"
+REDIS_IMAGE="redis:7-alpine"
+NC_IMAGE="nextcloud:stable-apache"
+
+# Hostnames Nextcloud will accept. Add the public URL here once decided -
+# Nextcloud refuses to serve a domain that is not in this list.
+TRUSTED_DOMAINS="${NEXTCLOUD_TRUSTED_DOMAINS:-} tower tower.galaxus.box 192.168.1.101:${HTTP_PORT} localhost:${HTTP_PORT}"
+TRUSTED_DOMAINS="$(echo "$TRUSTED_DOMAINS" | xargs)"   # trim
+
+log() { echo ">>> $*"; }
+
+docker network inspect "$NET" >/dev/null 2>&1 || {
+  log "creating network $NET"; docker network create "$NET" >/dev/null
+}
+
+mkdir -p "${APPDATA}/nextcloud-db" "${APPDATA}/nextcloud-redis" "${APPDATA}/nextcloud" "${NC_DATA}"
+
+recreate() { # recreate <name>  - remove an existing container so config changes apply
+  docker rm -f "$1" >/dev/null 2>&1 && log "removed old container: $1" || true
+}
+
+# ------------------------------------------------------------------ PostgreSQL
+recreate nextcloud-db
+log "starting nextcloud-db (${PG_IMAGE})"
+docker run -d \
+  --name nextcloud-db \
+  --network "$NET" \
+  --restart unless-stopped \
+  -v "${APPDATA}/nextcloud-db:/var/lib/postgresql/data" \
+  -e POSTGRES_DB="$POSTGRES_DB" \
+  -e POSTGRES_USER="$POSTGRES_USER" \
+  -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  --health-cmd="pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" \
+  --health-interval=10s --health-retries=12 \
+  "$PG_IMAGE" >/dev/null
+
+# ----------------------------------------------------------------------- Redis
+# Nextcloud uses Redis for file locking and as a memory cache. Without it
+# Nextcloud logs a warning and concurrent access is noticeably slower.
+recreate nextcloud-redis
+log "starting nextcloud-redis (${REDIS_IMAGE})"
+docker run -d \
+  --name nextcloud-redis \
+  --network "$NET" \
+  --restart unless-stopped \
+  -v "${APPDATA}/nextcloud-redis:/data" \
+  "$REDIS_IMAGE" redis-server --save 60 1 --loglevel warning >/dev/null
+
+# ------------------------------------------------------- wait for the database
+log "waiting for postgres to accept connections..."
+for i in $(seq 1 30); do
+  if [[ "$(docker inspect -f '{{.State.Health.Status}}' nextcloud-db 2>/dev/null)" == "healthy" ]]; then
+    log "postgres healthy after $((i*3))s"; break
+  fi
+  sleep 3
+  (( i == 30 )) && { echo "!! postgres did not become healthy" >&2; docker logs --tail 30 nextcloud-db; exit 1; }
+done
+
+# ------------------------------------------------------------------- Nextcloud
+recreate nextcloud
+log "starting nextcloud (${NC_IMAGE})"
+docker run -d \
+  --name nextcloud \
+  --network "$NET" \
+  --restart unless-stopped \
+  -p "${HTTP_PORT}:80" \
+  -v "${APPDATA}/nextcloud:/var/www/html" \
+  -v "${NC_DATA}:/var/www/html/data" \
+  -e POSTGRES_HOST="nextcloud-db" \
+  -e POSTGRES_DB="$POSTGRES_DB" \
+  -e POSTGRES_USER="$POSTGRES_USER" \
+  -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  -e REDIS_HOST="nextcloud-redis" \
+  -e NEXTCLOUD_ADMIN_USER="$NEXTCLOUD_ADMIN_USER" \
+  -e NEXTCLOUD_ADMIN_PASSWORD="$NEXTCLOUD_ADMIN_PASSWORD" \
+  -e NEXTCLOUD_TRUSTED_DOMAINS="$TRUSTED_DOMAINS" \
+  -e NEXTCLOUD_DATA_DIR="/var/www/html/data" \
+  "$NC_IMAGE" >/dev/null
+
+log "done. containers:"
+docker ps --filter "network=${NET}" --format "  {{.Names}}\t{{.Status}}\t{{.Image}}"
+echo
+log "Nextcloud will take a minute to initialise on first run."
+log "Then: http://tower:${HTTP_PORT}"
+log "Credentials: ssh tower 'cat /boot/config/secrets/nextcloud.env'"
