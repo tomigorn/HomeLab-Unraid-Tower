@@ -34,7 +34,21 @@ RSYNC_OPTS=(-rltv --no-perms --no-owner --no-group --exclude='.gitkeep' --prune-
 
 echo ">>> target: ${HOST}"
 
-if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" true 2>/dev/null; then
+# The server powers itself off when idle (D10), so being unreachable is its
+# normal resting state rather than an error. Wake it and wait for the array,
+# otherwise every deploy/fetch would need a manual wake first.
+ensure_awake() {
+  local wake="${REPO_ROOT}/scripts/wake-tower.sh"
+  if ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" true 2>/dev/null; then
+    return 0
+  fi
+  echo ">>> ${HOST} is not responding - waking it"
+  [[ -x "$wake" ]] || { echo "!! ${wake} not found" >&2; return 1; }
+  "$wake" || return 1
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" true 2>/dev/null
+}
+
+if ! ensure_awake; then
   echo "!! cannot reach ${HOST} over SSH with key auth" >&2
   exit 1
 fi

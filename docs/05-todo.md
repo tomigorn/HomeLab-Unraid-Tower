@@ -80,6 +80,55 @@ access. None can be done over SSH by an agent.
 
 ---
 
+## 🚨 URGENT — Wake-on-LAN stopped working (2026-08-16)
+
+**The server is currently unreachable and will not wake. It needs to be checked
+physically.**
+
+WoL worked three times earlier the same day, including once from a ~6 hour
+overnight power-off (wake to array-mounted in 102 s). It then stopped. Evidence:
+
+- 20 magic packets sent across `192.168.1.255` and `255.255.255.255`, ports 9
+  and 7, over 5 rounds
+- 90 s wait, then a full `/24` sweep
+- MAC `60:be:b4:17:0d:e0` is **absent from the network entirely**
+- The workstation's own networking is fine (gateway replies in 0.5 ms)
+
+**The distinguishing factor:** every successful wake followed a power-off that
+was issued manually and watched. This failure followed the first power-off
+performed autonomously by the `idle-shutdown` job.
+
+Two hypotheses, and they need different fixes:
+
+1. **The shutdown did not complete.** A hung `powerdown` leaves the machine
+   neither running nor in S5, so the NIC never arms for WoL. Symptom would be
+   fans still spinning with no video and no network.
+2. **The board drops NIC standby power** after some period or under some
+   condition (ErP/EuP behaviour), disarming WoL despite `Wake-on: g` being set
+   at runtime.
+
+### ⚠️ Until this is understood, autonomous power-off is not safe here
+
+A headless server in a closet that cannot be woken remotely is worse than one
+that stays powered on. **Consider creating `/boot/config/no-autoshutdown` to
+pause auto power-off** until the cause is found.
+
+### To diagnose, at the machine
+
+- [ ] Are the fans spinning and any LEDs lit? (fans + no network = hung shutdown,
+      hypothesis 1)
+- [ ] NIC link LEDs with the machine off — a WoL-armed NIC usually shows a link
+      light even when the system is down. Dark means no standby power to the NIC
+      (hypothesis 2)
+- [ ] Press power, then check `dmesg` and `/var/log/syslog` for how the previous
+      shutdown ended
+- [ ] Re-check BIOS: **ErP / EuP must be DISABLED**, PCIe Power On / PME enabled
+- [ ] Confirm `ethtool eth0 | grep Wake-on` still reports `g` after a cold boot
+- [ ] Then reproduce deliberately: let `idle-shutdown` power it off unattended
+      and try to wake it, rather than testing after a manual `powerdown`
+
+---
+
 ## 🔴 Blocking — these make other work untrustworthy
 
 ### 1. Notifications — nothing is configured
