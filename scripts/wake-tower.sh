@@ -24,7 +24,11 @@ HOST="${TOWER_HOST:-tower}"
 # serving while this script reported "did not come up within 180s").
 IP="${TOWER_IP:-192.168.1.101}"
 BCAST="${TOWER_BCAST:-192.168.1.255}"
-TIMEOUT="${WAKE_TIMEOUT:-180}"
+# 180s was too tight. This board has been observed taking 245s for a SATA link
+# to come up (the 6TB SMR drive, see docs/00-hardware.md), during which the
+# machine is powered on but has not finished initialising hardware - looking
+# exactly like a failed wake. Normal cold boot to a mounted array is ~102s.
+TIMEOUT="${WAKE_TIMEOUT:-300}"
 
 send_magic_packet() {
   python3 - "$MAC" "$BCAST" <<'PY'
@@ -61,8 +65,25 @@ echo "waiting for network (up to ${TIMEOUT}s)..."
 until ping -c1 -W2 "$IP" >/dev/null 2>&1; do
   (( SECONDS - start >= TIMEOUT )) && {
     echo "!! ${IP} did not respond within ${TIMEOUT}s" >&2
-    echo "   check: BIOS ErP/EuP disabled, PCIe Power On enabled," >&2
-    echo "          and 'ethtool eth0' reporting Wake-on: g" >&2
+    echo >&2
+    # Distinguish "never powered on" from "powered on but not networked".
+    # A MAC present anywhere on the LAN means WoL worked and the boot is the
+    # problem; total absence means the magic packet never took effect.
+    echo "   diagnosing: is the MAC visible anywhere on the LAN?" >&2
+    for i in $(seq 1 254); do (ping -c1 -W1 "192.168.1.${i}" >/dev/null 2>&1 &); done
+    sleep 5
+    if ip neigh show 2>/dev/null | grep -qi "${MAC}"; then
+      echo "   -> MAC IS on the LAN. WoL worked; the machine booted but is not" >&2
+      echo "      reachable at ${IP}. Check for a changed IP, or a stalled boot." >&2
+    else
+      echo "   -> MAC is ABSENT from the LAN entirely. Either it never powered" >&2
+      echo "      on, or it is still initialising hardware." >&2
+      echo "      Check physically: fans spinning + no NIC link = booted but stalled." >&2
+      echo "      Once it is back, read /boot/logs/syslog for the previous shutdown." >&2
+    fi
+    echo >&2
+    echo "   also verify: BIOS ErP/EuP disabled, PCIe Power On enabled," >&2
+    echo "                'ethtool eth0' reporting Wake-on: g" >&2
     exit 1
   }
   sleep 5

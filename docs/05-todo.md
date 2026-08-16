@@ -98,14 +98,48 @@ overnight power-off (wake to array-mounted in 102 s). It then stopped. Evidence:
 was issued manually and watched. This failure followed the first power-off
 performed autonomously by the `idle-shutdown` job.
 
-Two hypotheses, and they need different fixes:
+### Investigation so far (2026-08-16)
 
-1. **The shutdown did not complete.** A hung `powerdown` leaves the machine
-   neither running nor in S5, so the NIC never arms for WoL. Symptom would be
-   fans still spinning with no video and no network.
-2. **The board drops NIC standby power** after some period or under some
-   condition (ErP/EuP behaviour), disarming WoL despite `Wake-on: g` being set
-   at runtime.
+**Not reproducible on demand.** A controlled test — `powerdown` issued the same
+way `idle-shutdown` issues it, then a wake — succeeded in 102 s, identical to
+every successful run. So the fault is intermittent and is *not* caused by the
+autonomous shutdown path specifically. This morning's wake, which followed an
+autonomous overnight power-off, also worked.
+
+**Ruled out.** The NIC is an **Intel I226-V [8086:125c] rev 04**, a family with
+well-documented link-instability bugs. The two standard mitigations were
+checked and are *already in place*:
+
+- `EEE status: disabled` (Energy Efficient Ethernet — the usual culprit)
+- `ASPM: Disabled` on the NIC, kernel policy `default`
+
+**Current leading hypothesis: the machine wakes but is slow or stalled in early
+boot.** This fits the reported symptom — it started, but the ethernet was not
+blinking. Supporting evidence from the very first inspection of this machine:
+
+```
+[   4.365] ata2: SATA link down
+[ 245.943] ata2: SATA link up 6.0 Gbps    <- 245 seconds
+```
+
+The 6TB SMR drive has previously taken over four minutes to appear. During that
+window the machine is powered on but has not finished initialising, which is
+indistinguishable from a failed wake. The wake script's timeout was 180 s,
+shorter than that observed delay — so a slow boot would be *reported* as a
+failed wake.
+
+**Changes made in response:**
+- Wake timeout raised 180 s → 300 s (normal cold boot to mounted array is 102 s)
+- On timeout the script now sweeps the LAN for the MAC, which distinguishes
+  "never powered on" from "powered on but not reachable"
+- Syslog is now mirrored to `/boot/logs/syslog`, so the next failure has a
+  shutdown and boot record to inspect
+
+**Still possible, not yet excluded:**
+1. The shutdown does not always complete, leaving the NIC unarmed.
+2. The board intermittently drops NIC standby power.
+3. Marginal SATA/power on the 6TB stalls the boot — note this drive already
+   needed its cables reseated once for exactly this reason.
 
 ### ⚠️ Until this is understood, autonomous power-off is not safe here
 
