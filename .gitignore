@@ -13,11 +13,16 @@ secrets/*
 *.key
 Trial.key
 
-# Private SSH keys (public keys are fine and are committed)
-config/ssh/**/id_*
-!config/ssh/**/*.pub
-config/ssh/**/ssh_host_*
-!config/ssh/**/ssh_host_*.pub
+# Private SSH keys (public keys are fine and are committed).
+# Paths live under boot/ since the repo mirrors the server's flash.
+boot/config/ssh/**/id_*
+boot/config/ssh/**/ssh_host_*
+!boot/config/ssh/**/*.pub
+!boot/config/ssh/root/authorized_keys
+
+# Anything else on the flash that is machine-generated or secret
+boot/config/secrets/
+boot/logs/
 
 # super.dat is a binary blob of array assignments; documented in docs/ instead
 super.dat

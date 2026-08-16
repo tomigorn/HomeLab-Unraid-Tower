@@ -8,31 +8,61 @@ of `/boot/config` is enough to rebuild.
 
 ## Layout
 
+**`boot/` mirrors `/boot` on the server exactly.** What you see here is where it
+lands there — no translation table, no mapping buried in a script:
+
+```
+boot/config/go                                     -> /boot/config/go
+boot/config/scripts/lib/notify.sh                  -> /boot/config/scripts/lib/notify.sh
+boot/config/scripts/stacks/nextcloud/up.sh         -> /boot/config/scripts/stacks/nextcloud/up.sh
+boot/config/plugins/user.scripts/scripts/<job>/    -> same path on the server
+boot/config/shares/*.cfg                           -> /boot/config/shares/
+```
+
 | Path | Contents |
 |---|---|
-| `docs/` | Runbook, decisions and why, recovery procedures |
-| `config/` | Version-controlled copies of live `/boot/config/…` artifacts |
-| `scripts/user-scripts/` | Jobs run by the User Scripts plugin (one dir each) |
-| `scripts/lib/` | Shared helpers (notifications, guards) |
-| `docker/` | Compose files / Unraid template XML per container |
+| `boot/` | Mirror of the server's flash. Deployment is a straight tree copy |
+| `bin/` | Tools that run **here**, on the workstation (e.g. `wake-tower.sh`) |
+| `docs/` | Runbook, decisions and why, recovery procedures, open items |
 | `deploy/` | Push repo → server, and pull server → repo for drift checks |
 | `secrets/` | `*.env.example` templates only — real values never committed |
 
-## The Unraid persistence quirk
+### Why copies and not symlinks
 
-Unraid runs from RAM and rebuilds itself from the USB flash drive on every boot.
-**Only `/boot/config/…` (plus appdata on the pools) survives a reboot.** Anything
-written to `/root`, `/etc` or `/usr` is gone at next power-on.
+A dotfiles-style symlink farm is not possible on Unraid, for two independent
+reasons:
 
-That is why deployment is "rsync into `/boot/config/`" rather than "install to the
-filesystem". See `docs/02-build-order.md` and `deploy/deploy.sh`.
+1. **`/boot` is VFAT and cannot represent a symlink.** `ln -s` there fails with
+   `Operation not permitted`. It is not a permissions problem — the filesystem
+   has no such concept.
+2. **`/boot/config` is the only location that survives a reboot.** Unraid runs
+   from RAM and rebuilds itself from the flash at every boot. Cloning this repo
+   onto the ZFS pool and symlinking from there fails too: the pool is not
+   mounted at boot, which is precisely when Unraid reads its config.
+
+So the repo is the source of truth and `deploy.sh` copies from it, while
+`fetch.sh` pulls the live state back so any divergence shows up in `git diff`.
 
 ## Usage
 
 ```bash
-./deploy/deploy.sh          # push config/ + scripts/ to the server
-./deploy/fetch.sh           # pull live config back, then `git diff` to see drift
+./deploy/deploy.sh                      # push boot/ -> server:/boot/
+./deploy/deploy.sh --dry-run            # show what would change
+./deploy/fetch.sh && git diff           # pull live state back, see any drift
+
+DEPLOY_SHARES=1    ./deploy/deploy.sh   # also push share .cfg files
+DEPLOY_SCHEDULES=1 ./deploy/deploy.sh   # also push User Scripts schedules
+
+./bin/wake-tower.sh                     # wake the server (~102s to a mounted array)
 ```
+
+Share configs and `schedule.json` are excluded by default because getting them
+wrong is silent: a stale share config redirects where data physically lands, and
+a stale `schedule.json` unschedules jobs — and a job that never runs looks
+exactly like a healthy one.
+
+Both deploy and fetch **wake the server automatically** if it is asleep, which
+is its normal resting state (D10).
 
 Both use the `tower` SSH host alias. See `docs/04-security.md` for the SSH setup.
 
