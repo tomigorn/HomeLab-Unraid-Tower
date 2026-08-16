@@ -281,3 +281,35 @@ so the state repairs itself if anything ever resets it.
 **Do not "fix" this by setting `check_data_directory_permissions => false`.**
 That silences the check while leaving the data world-readable, which matters
 once a non-root SMB user exists.
+
+
+---
+
+## D12 — Wake-on-request is handled by fastpi, not by tower
+
+tower powers itself off when idle (D10), which makes anything it hosts
+unreachable. The gate that wakes it therefore has to live somewhere that is
+always on: **fastpi**, in front of Traefik.
+
+fastpi already does exactly this for `beefy` (`Docker/Beefy-Waker` plus a
+`forwardAuth` middleware), so tower gets a second instance of a proven service
+rather than a new design. Config is prepared in `fastpi/` in this repo.
+
+**Probe the service port (8080), not SSH (22).** This is the one substantive
+difference from the beefy setup. On Unraid, SSH answers about **21 seconds
+before the array is mounted**, so a port-22 probe reports ready while every
+share is still missing. Nextcloud cannot answer on 8080 until Docker started,
+which cannot happen until the array mounted — so the service port is a strictly
+better readiness signal, and it keeps all Unraid-specific knowledge out of the
+waker.
+
+**A rate limit sits in front of the public gate.** Beefy's services are
+internal; Nextcloud is meant to be public. Without a limit, any internet request
+— including a bot scanning the tunnel — powers the server on, which both defeats
+the power saving and hands a stranger a power switch.
+
+**`bin/wake-tower.sh` stays.** It is used by `deploy.sh` and `fetch.sh`, and
+being a direct magic packet it has no dependency on fastpi being up. The waker
+serves browsers; the script serves tooling. The Beefy-Waker README already notes
+that the waker is a single point of failure, and keeping an out-of-band path is
+the answer to that.

@@ -68,6 +68,14 @@ access. None can be done over SSH by an agent.
 | **Router: UPnP off, confirm no port forwards** | Router admin | router GUI |
 | **Licence purchase** | Payment | Tools → Registration |
 
+### Done since that list was written
+
+- [x] **Repo pushed to GitHub** — `tomigorn/HomeLab-Unraid-Tower`, private.
+      This closes the "only one copy exists" risk: the thing describing how to
+      rebuild the NAS no longer lives solely on one workstation.
+- [x] **Git identity and SSH commit signing** on bazzite; history rewritten so
+      all commits are authored by tomigorn and signed.
+
 ### Deliberately not done, though I could have
 
 - **Monthly scrub and SMART schedules.** Writing and scheduling new jobs
@@ -290,7 +298,8 @@ Still untested:
 - [ ] Decide: is the Nextcloud **desktop sync client** important? It polls every
       ~30s, which keeps the server permanently awake and roughly halves the
       power saving. Browser + mobile alone would keep the full saving
-- [ ] fastpi + Traefik wake-on-request proxy for the public URL
+- [~] **fastpi + Traefik wake-on-request proxy** (D12) — config written, not
+      yet deployed. See `fastpi/` and `fastpi/PROMPT.md`. Continues on fastpi.
 - [ ] fastpi orchestration of scheduled jobs (D10)
 
   Note for whoever writes it: SSH answers about **5 seconds before** the array

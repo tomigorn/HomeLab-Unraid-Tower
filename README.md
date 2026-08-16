@@ -79,4 +79,9 @@ Nextcloud with version history, hourly ZFS snapshots, and a local backup to the
 6TB.
 
 Not yet working: **notifications** (so failures are currently silent) and the
-**offsite backup**. No restore has been tested. See the TODO.
+**offsite backup**. See the TODO.
+
+Restores *have* been tested — a drill found and fixed a defect that would have
+made the Nextcloud database unrestorable (`docs/03-recovery.md`, S4b).
+
+Work continues on **fastpi**: see `fastpi/PROMPT.md`.
