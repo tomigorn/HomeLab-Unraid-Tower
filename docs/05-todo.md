@@ -44,13 +44,26 @@ Credential template already committed at `secrets/rclone-b2.env.example`.
 NAS — otherwise the event that destroys the NAS also destroys your access to
 the backups.
 
-### 3. No restore has ever been tested
+### 3. ~~No restore has ever been tested~~ — **DRILL COMPLETED 2026-08-16**
 
-Every backup here is currently a *hypothesis*. Needs a deliberate drill:
+- [x] restore a file from a ZFS snapshot — valid 500x500 PNG recovered
+- [x] restore a file from a dated tree on the 6TB
+- [x] all three copies verified **bit-for-bit identical** by md5
+- [x] Postgres dump restored into a scratch container — 0 errors, 102
+      `oc_filecache` rows and the `admin` user matching live exactly
 
-- [ ] restore a file from a ZFS snapshot (`.zfs/snapshot/`)
-- [ ] restore a file from a dated tree on the 6TB
-- [ ] restore the Postgres dump into a scratch container and confirm it loads
+**The drill found a real defect and it is now fixed.** `pg_dump` dumps a
+database, not the cluster's roles. Nextcloud creates and connects as its own
+role `oc_admin`, so the original backup would have produced a database with
+perfect data that Nextcloud could not log into. The backup now also runs
+`pg_dumpall --globals-only`; restoring globals first takes the restore from
+**235 errors to 0**, with table ownership matching live (`oc_admin | 131`).
+
+Procedure documented at `03-recovery.md` (S4b).
+
+Still untested:
+- [ ] a *full* disaster restore onto empty disks, rather than component restores
+- [ ] restore from the offsite copy (does not exist yet)
 
 ---
 

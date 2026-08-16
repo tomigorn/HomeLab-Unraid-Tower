@@ -108,6 +108,74 @@ ransomware that reached both).
 
 ---
 
+## S4b — Restore Nextcloud (files + database)
+
+⚠️ **Restore order matters. Roles first, then the database.**
+
+`pg_dump` dumps a *database*, not the cluster's *roles*. Nextcloud's installer
+creates its own role — **`oc_admin`** — makes it own all 131 tables, and
+connects as it rather than as `POSTGRES_USER`. Restoring only the database dump
+gives you a database whose data is perfectly intact and which Nextcloud
+**cannot log into**, because the role it authenticates as does not exist.
+
+This was found by an actual restore drill, not in theory: the database dump
+alone restored 131 tables and threw **235** `role "oc_admin" does not exist`
+errors, leaving every table owned by the wrong user.
+
+### 1. Bring up an empty Postgres
+
+```bash
+bash /boot/config/scripts/stacks/nextcloud/up.sh
+```
+
+### 2. Restore roles FIRST
+
+```bash
+zcat /mnt/disk1/backup/db/globals-YYYY-MM-DD.sql.gz \
+  | docker exec -i nextcloud-db psql -U nextcloud -d postgres
+```
+
+`role "nextcloud" already exists` is expected and harmless — the container
+created it at startup.
+
+### 3. Then the database
+
+```bash
+docker exec -i nextcloud-db psql -U nextcloud -d postgres \
+  -c 'DROP DATABASE IF EXISTS nextcloud;' -c 'CREATE DATABASE nextcloud;'
+
+zcat /mnt/disk1/backup/db/nextcloud-YYYY-MM-DD.sql.gz \
+  | docker exec -i nextcloud-db psql -U nextcloud -d nextcloud
+```
+
+**Expect zero errors.** Any `role ... does not exist` means step 2 was skipped.
+
+### 4. Restore the files
+
+```bash
+rsync -a --delete /mnt/disk1/backup/nextcloud/YYYY-MM-DD/ /mnt/data/nextcloud/
+rsync -a          /mnt/disk1/backup/appdata/YYYY-MM-DD/   /mnt/data/appdata/
+```
+
+### 5. Verify before trusting it
+
+```bash
+# ownership must be oc_admin, not nextcloud
+docker exec nextcloud-db psql -U nextcloud -d nextcloud -t -A -F' | ' \
+  -c "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = current_schema() GROUP BY tableowner;"
+
+# row counts should match what you expect
+docker exec nextcloud-db psql -U nextcloud -d nextcloud -t -c 'SELECT count(*) FROM oc_filecache;'
+
+docker exec -u www-data nextcloud php occ status
+docker exec -u www-data nextcloud php occ files:scan --all
+```
+
+`files:scan` reconciles the database against what is actually on disk — run it
+whenever files are restored outside Nextcloud.
+
+---
+
 ## S5 — Ransomware / mass deletion, pool itself healthy
 
 ZFS snapshots are read-only and are the fastest path back.

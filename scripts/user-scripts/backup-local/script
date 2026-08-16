@@ -94,6 +94,30 @@ dump_database() {
   [[ -r "$SECRETS" ]] || { warn "no ${SECRETS} - skipping database dump"; return; }
   set -a; . "$SECRETS"; set +a
 
+  # ---- roles/globals ----------------------------------------------------
+  # pg_dump dumps a DATABASE, not the cluster's ROLES. Nextcloud's installer
+  # creates its own role (oc_admin) and makes it own all 131 tables, and
+  # Nextcloud connects as that role - not as POSTGRES_USER.
+  #
+  # Without this, a disaster restore produces a database whose data is
+  # perfectly intact and which Nextcloud cannot log into, because the role it
+  # authenticates as does not exist. Found by an actual restore drill; the
+  # database dump alone restored 131 tables and threw 235 "role oc_admin does
+  # not exist" errors, leaving every table owned by the wrong user.
+  #
+  # Restore order matters: globals FIRST, then the database dump.
+  local g="${out}/globals-${TODAY}.sql.gz"
+  log "dumping roles/globals -> $(basename "$g")"
+  if docker exec "$DB_CONTAINER" pg_dumpall -U "$POSTGRES_USER" --globals-only 2>/dev/null \
+       | gzip -c > "${g}.tmp"; then
+    mv -f "${g}.tmp" "$g"
+    log "  globals dump ok ($(du -h "$g" | cut -f1))"
+  else
+    rm -f "${g}.tmp"
+    warn "pg_dumpall --globals-only failed - a restore would not recreate the oc_admin role"
+  fi
+
+  # ---- the database itself ----------------------------------------------
   local f="${out}/nextcloud-${TODAY}.sql.gz"
   log "dumping database -> $(basename "$f")"
   if docker exec "$DB_CONTAINER" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" 2>/dev/null \
@@ -107,8 +131,10 @@ dump_database() {
   fi
 
   # Keep the same number of dumps as daily trees.
-  ls -1t "${out}"/nextcloud-*.sql.gz 2>/dev/null | tail -n +$(( KEEP_DAILY + 1 )) \
-    | while read -r old; do rm -f "$old" && log "  pruned old dump: $(basename "$old")"; done
+  for pat in "nextcloud-" "globals-"; do
+    ls -1t "${out}/${pat}"*.sql.gz 2>/dev/null | tail -n +$(( KEEP_DAILY + 1 )) \
+      | while read -r old; do rm -f "$old" && log "  pruned old dump: $(basename "$old")"; done
+  done
 }
 
 # ------------------------------------------------------------ dataset -> array
