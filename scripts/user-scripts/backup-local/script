@@ -25,7 +25,7 @@
 #   writing and the worst case for a shingled drive), --whole-file to skip
 #   delta read-modify-write, and a single stream so writes stay sequential.
 #
-# Schedule: 30 3 * * *
+# Schedule: */30 * * * *  (fires often, no-ops unless today's backup is missing)
 
 set -uo pipefail
 
@@ -61,6 +61,21 @@ die()  {
 }
 
 [[ -d "$DEST_ROOT" ]] || die "destination missing: ${DEST_ROOT} (is the array started?)"
+
+# ------------------------------------------------------- run-once-per-day guard
+# This runs every 30 minutes rather than at a fixed nightly hour, because the
+# server powers itself off when idle (D10) and would simply be off at 03:30.
+# A fixed-time schedule on an intermittently-awake machine silently never fires
+# - the worst kind of backup failure, because nothing reports an error.
+#
+# Instead: fire often, and no-op unless today's backup is still missing. The
+# first time the server is awake each day, the backup happens.
+if [[ "${FORCE:-0}" != "1" ]] \
+   && [[ -d "${DEST_ROOT}/nextcloud/${TODAY}" ]] \
+   && [[ -f "${DEST_ROOT}/db/nextcloud-${TODAY}.sql.gz" ]]; then
+  echo "$(date '+%F %T') backup for ${TODAY} already complete - nothing to do"
+  exit 0
+fi
 
 # The array disk must really be mounted. Writing into an unmounted mountpoint
 # would silently fill the root filesystem instead of backing anything up.
