@@ -80,8 +80,9 @@ Legend: `[x]` done and verified · `[~]` done, verification pending · `[ ]` not
 All exclusive (Secondary storage = none) — see D4.
 
 - [ ] `photos` → `data`
-- [ ] `appdata` → `data`
-- [ ] `system` → `data`
+- [x] `appdata` → `data` — verified `shareUseCache="only"`, `shareCachePool="data"`,
+      no secondary; physically present at `/mnt/data/appdata`
+- [x] `system` → `data` — same, at `/mnt/data/system`
 - [ ] `backup` → Array
 - [ ] `media` → Array
 
@@ -203,10 +204,15 @@ See `00-hardware.md` for the measured wake cycle.
 - [ ] Restore on AC Power Loss → Power On (independent of WoL — this is what
       recovers the machine after a power cut with nobody present)
 
-- [ ] CPU governor `performance` → `powersave` (Tips and Tweaks plugin)
+- [x] CPU governor `performance` → `powersave` (Tips and Tweaks plugin)
+      All four cores were pinned at 2800 MHz while idle; now 799-1019 MHz.
+      Persisted as `CPU_GOVERNOR="powersave"`.
 
-- [ ] Re-measure idle draw once the HDD has parked and the governor is changed.
-      Baseline: **25.1 W** at idle with the HDD spinning.
+- [x] Idle draw re-measured: **25.1 W → 23.4 W** (-1.7 W).
+      Remaining idle-power tweaks have poor return: with the machine powered off
+      most of the day, watts saved while idle barely register. The one item still
+      worth doing is physically removing the unassigned NVMe (D2), which is
+      enumerated and drawing power for nothing.
 
 - [ ] **fastpi orchestration** — implement only after backups are proven working
       on an always-on machine (see D10 sequencing). fastpi wakes the server, runs
