@@ -1,0 +1,19 @@
+# No [user] block on purpose.
+#
+# Identity is set ONLY inside the directory trees below. A commit attempted
+# anywhere else fails until an identity is set explicitly, which prevents
+# accidentally committing to an unrelated repo as the wrong person.
+
+[includeIf "gitdir:~/Projects/"]
+    path = ~/.gitconfig-private
+
+# Kept so the same layout works if the Mac's ~/development/private/ convention
+# is used here too.
+[includeIf "gitdir:~/development/private/"]
+    path = ~/.gitconfig-private
+
+[init]
+    defaultBranch = main
+
+[pull]
+    ff = only

@@ -1,0 +1,19 @@
+[user]
+    name = tomigorn
+    email = tomigorn@gmail.com
+    signingkey = ~/.ssh/gitHub-Tomigorn.pub
+
+[core]
+    sshCommand = ssh -i ~/.ssh/gitHub-Tomigorn -o IdentitiesOnly=yes
+
+[gpg]
+    format = ssh
+
+[gpg "ssh"]
+    allowedSignersFile = ~/.ssh/allowed_signers-private
+
+[commit]
+    gpgsign = true
+
+[tag]
+    gpgsign = true
