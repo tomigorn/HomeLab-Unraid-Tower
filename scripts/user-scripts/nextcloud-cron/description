@@ -1,0 +1,1 @@
+Runs Nextcloud background jobs. Nextcloud is set to backgroundjobs_mode=cron, so version expiry, trash cleanup, file scans and share expiry ONLY happen when this fires. Schedule: */5 * * * *

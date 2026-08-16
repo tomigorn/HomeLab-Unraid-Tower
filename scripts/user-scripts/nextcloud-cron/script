@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Nextcloud background jobs.
+#
+# Nextcloud is configured with backgroundjobs_mode=cron, which means its
+# background work ONLY happens when this script fires. If this job stops, the
+# failure is silent and slow: version expiry stops (versions accumulate until
+# they fill the pool), the trash bin never empties, file scans and share
+# expiry stall, and notifications dry up. Nothing errors - it just quietly
+# stops tidying up.
+#
+# The alternative, ajax mode, only runs jobs when someone loads a page. On a
+# server that powers itself off after 30 minutes idle (D10), that is close to
+# never.
+#
+# Schedule: */5 * * * *
+
+set -uo pipefail
+
+CONTAINER="nextcloud"
+
+# The server may have just booted, or the container may be stopped. That is not
+# an error worth alerting on - just nothing to do this tick.
+if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+  echo "$(date '+%F %T') ${CONTAINER} not running - skipping"
+  exit 0
+fi
+
+# Nextcloud refuses to run cron while in maintenance mode (e.g. mid-upgrade).
+if docker exec -u www-data "$CONTAINER" php occ status 2>/dev/null | grep -q "maintenance: true"; then
+  echo "$(date '+%F %T') ${CONTAINER} in maintenance mode - skipping"
+  exit 0
+fi
+
+start=$SECONDS
+if docker exec -u www-data "$CONTAINER" php -f /var/www/html/cron.php; then
+  echo "$(date '+%F %T') nextcloud cron ok ($(( SECONDS - start ))s)"
+else
+  rc=$?
+  echo "$(date '+%F %T') nextcloud cron FAILED (rc=${rc})" >&2
+  [[ -r /boot/config/scripts/lib/notify.sh ]] && . /boot/config/scripts/lib/notify.sh
+  declare -F notify_alert >/dev/null && \
+    notify_alert "Nextcloud cron failed" "rc=${rc} - background jobs are not running"
+  exit $rc
+fi
