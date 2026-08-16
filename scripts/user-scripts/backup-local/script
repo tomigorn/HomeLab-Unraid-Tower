@@ -1,0 +1,181 @@
+#!/bin/bash
+#
+# Nightly local backup: ZFS mirror -> 6TB array disk (backup tier 2 of 3, D6).
+#
+# A mirror is not a backup and neither are snapshots: both live in the same
+# pool, in the same machine. This tier survives losing the entire pool.
+#
+# Design notes:
+#
+# * rsync reads from a dedicated ZFS snapshot, not the live filesystem, so the
+#   source cannot change mid-copy. The snapshot is destroyed afterwards.
+#
+# * The database is dumped with pg_dump rather than copied as files. A file
+#   copy of a running Postgres is only crash-consistent; a logical dump is
+#   consistent by construction and can be restored into a different Postgres
+#   version. The raw data directory is therefore excluded from the rsync.
+#
+# * Dated directories with --link-dest give multiple restore points for almost
+#   no space: unchanged files are hardlinked to the previous run rather than
+#   copied. This is the equivalent of the "full + incrementals" scheme, except
+#   every dated directory is a complete browsable tree, so there is no chain to
+#   break - losing one does not invalidate the others.
+#
+# * SMR-safe rsync: no --inplace (it rewrites file interiors, which is random
+#   writing and the worst case for a shingled drive), --whole-file to skip
+#   delta read-modify-write, and a single stream so writes stay sequential.
+#
+# Schedule: 30 3 * * *
+
+set -uo pipefail
+
+SRC_DATASETS=("data/nextcloud" "data/appdata")
+DEST_ROOT="/mnt/disk1/backup"
+DB_CONTAINER="nextcloud-db"
+SECRETS="/boot/config/secrets/nextcloud.env"
+
+# Retention of dated backup trees on the 6TB.
+KEEP_DAILY=14
+KEEP_WEEKLY=8
+KEEP_MONTHLY=6
+
+# Excluded from the file copy: Postgres is handled by pg_dump, and Redis holds
+# only a rebuildable cache.
+EXCLUDES=(--exclude "nextcloud-db/" --exclude "nextcloud-redis/")
+
+RSYNC_OPTS=(-a --delete --whole-file --numeric-ids --human-readable)
+
+[[ -r /boot/config/scripts/lib/notify.sh ]] && . /boot/config/scripts/lib/notify.sh
+
+TODAY="$(date '+%Y-%m-%d')"
+STAMP="$(date '+%Y%m%d-%H%M%S')"
+start_all=$SECONDS
+errors=0
+
+log()  { echo "$(date '+%F %T') $*"; }
+warn() { echo "$(date '+%F %T') WARN: $*" >&2; errors=$(( errors + 1 )); }
+die()  {
+  echo "$(date '+%F %T') FATAL: $*" >&2
+  declare -F notify_alert >/dev/null && notify_alert "Local backup FAILED" "$*"
+  exit 1
+}
+
+[[ -d "$DEST_ROOT" ]] || die "destination missing: ${DEST_ROOT} (is the array started?)"
+
+# The array disk must really be mounted. Writing into an unmounted mountpoint
+# would silently fill the root filesystem instead of backing anything up.
+mountpoint -q /mnt/disk1 || die "/mnt/disk1 is not a mountpoint - array not started?"
+
+# --------------------------------------------------------------- database dump
+dump_database() {
+  local out="${DEST_ROOT}/db"
+  mkdir -p "$out"
+
+  if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    warn "${DB_CONTAINER} not running - skipping database dump"
+    return
+  fi
+
+  [[ -r "$SECRETS" ]] || { warn "no ${SECRETS} - skipping database dump"; return; }
+  set -a; . "$SECRETS"; set +a
+
+  local f="${out}/nextcloud-${TODAY}.sql.gz"
+  log "dumping database -> $(basename "$f")"
+  if docker exec "$DB_CONTAINER" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" 2>/dev/null \
+       | gzip -c > "${f}.tmp"; then
+    mv -f "${f}.tmp" "$f"
+    log "  database dump ok ($(du -h "$f" | cut -f1))"
+  else
+    rm -f "${f}.tmp"
+    warn "pg_dump failed"
+    return
+  fi
+
+  # Keep the same number of dumps as daily trees.
+  ls -1t "${out}"/nextcloud-*.sql.gz 2>/dev/null | tail -n +$(( KEEP_DAILY + 1 )) \
+    | while read -r old; do rm -f "$old" && log "  pruned old dump: $(basename "$old")"; done
+}
+
+# ------------------------------------------------------------ dataset -> array
+backup_dataset() {
+  local ds="$1"
+  local name="${ds##*/}"
+  local mnt; mnt="$(zfs get -H -o value mountpoint "$ds" 2>/dev/null)"
+  [[ -d "$mnt" ]] || { warn "no mountpoint for ${ds}"; return; }
+
+  local snap="${ds}@backup-${STAMP}"
+  if ! zfs snapshot "$snap" 2>/dev/null; then
+    warn "could not snapshot ${ds}"
+    return
+  fi
+
+  local src="${mnt}/.zfs/snapshot/backup-${STAMP}"
+  local dest_base="${DEST_ROOT}/${name}"
+  local dest="${dest_base}/${TODAY}"
+  local prev; prev="$(ls -1d "${dest_base}"/20*-*-* 2>/dev/null | grep -v "/${TODAY}\$" | tail -1)"
+
+  mkdir -p "$dest_base"
+
+  local link=()
+  [[ -n "$prev" ]] && link=(--link-dest="$prev") && log "  hardlinking unchanged files against $(basename "$prev")"
+
+  log "${ds} -> ${dest}"
+  local t0=$SECONDS
+  if rsync "${RSYNC_OPTS[@]}" "${EXCLUDES[@]}" "${link[@]}" "${src}/" "${dest}/"; then
+    log "  ok in $(( SECONDS - t0 ))s, $(du -sh "$dest" 2>/dev/null | cut -f1) apparent"
+  else
+    warn "rsync failed for ${ds}"
+  fi
+
+  zfs destroy "$snap" 2>/dev/null || warn "could not destroy ${snap}"
+  thin_dated "$dest_base"
+}
+
+# ------------------------------------------------- thin dated backup directories
+# Same grandfather-father-son idea as the ZFS snapshots, applied to directory
+# names. Age-based rather than count-based because the server powers off when
+# idle, so nightly runs are missed unpredictably.
+thin_dated() {
+  local base="$1" now; now="$(date +%s)"
+  declare -A seen_week=() seen_month=()
+  local kept=0 removed=0
+
+  while read -r d; do
+    [[ -d "$d" ]] || continue
+    local day="${d##*/}" ts age
+    ts="$(date -d "$day" +%s 2>/dev/null)" || continue
+    age=$(( (now - ts) / 86400 ))
+    local keep=0
+
+    if   (( age <= KEEP_DAILY )); then keep=1
+    elif (( age <= KEEP_WEEKLY * 7 )); then
+      local k; k="$(date -d "$day" '+%G-%V')"
+      [[ -z "${seen_week[$k]:-}" ]] && { seen_week[$k]=1; keep=1; }
+    elif (( age <= KEEP_MONTHLY * 31 )); then
+      local k; k="$(date -d "$day" '+%Y%m')"
+      [[ -z "${seen_month[$k]:-}" ]] && { seen_month[$k]=1; keep=1; }
+    fi
+
+    if (( keep )); then kept=$(( kept + 1 ))
+    else rm -rf "$d" && removed=$(( removed + 1 )); fi
+  done < <(ls -1d "${base}"/20*-*-* 2>/dev/null | sort -r)
+
+  log "  retention: kept ${kept}, removed ${removed}"
+}
+
+# ----------------------------------------------------------------------- run
+log "=== local backup start ==="
+dump_database
+for ds in "${SRC_DATASETS[@]}"; do backup_dataset "$ds"; done
+
+elapsed=$(( SECONDS - start_all ))
+free="$(df -h /mnt/disk1 | awk 'NR==2{print $4}')"
+
+if (( errors > 0 )); then
+  log "=== finished with ${errors} warning(s) in ${elapsed}s, ${free} free ==="
+  declare -F notify_warn >/dev/null && \
+    notify_warn "Local backup completed with ${errors} warning(s)" "see the User Scripts log; ${free} free on the array"
+  exit 1
+fi
+
+log "=== ok in ${elapsed}s, ${free} free on the array ==="

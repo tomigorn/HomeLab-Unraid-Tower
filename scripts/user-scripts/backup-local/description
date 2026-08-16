@@ -1,0 +1,1 @@
+Nightly backup of the ZFS mirror to the 6TB array disk (tier 2 of 3). Dumps Postgres with pg_dump, rsyncs from a dedicated ZFS snapshot so the source cannot change mid-copy, and keeps dated restore points using --link-dest hardlinks. SMR-safe rsync flags. Retention: 14 daily, 8 weekly, 6 monthly. Schedule: 30 3 * * *

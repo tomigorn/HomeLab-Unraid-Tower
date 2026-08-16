@@ -4,5 +4,17 @@
         "frequency": "custom",
         "id": "scheduleidle-shutdown",
         "custom": "*/5 * * * *"
+    },
+    "/boot/config/plugins/user.scripts/scripts/nextcloud-cron/script": {
+        "script": "/boot/config/plugins/user.scripts/scripts/nextcloud-cron/script",
+        "frequency": "custom",
+        "id": "schedulenextcloud-cron",
+        "custom": "*/5 * * * *"
+    },
+    "/boot/config/plugins/user.scripts/scripts/zfs-snapshot/script": {
+        "script": "/boot/config/plugins/user.scripts/scripts/zfs-snapshot/script",
+        "frequency": "custom",
+        "id": "schedulezfs-snapshot",
+        "custom": "0 * * * *"
     }
 }
