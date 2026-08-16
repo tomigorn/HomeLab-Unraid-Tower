@@ -18,7 +18,18 @@ set -a; . "$SECRETS"; set +a
 
 NET="nextcloud"
 APPDATA="/mnt/user/appdata"
-NC_DATA="/mnt/user/nextcloud"       # user files - its own ZFS dataset
+# User files. NOTE the /data subdirectory - this is deliberate and load-bearing.
+#
+# Unraid's emhttpd runs `chmod 0777` + `chown nobody:users` on every user share
+# root at each array start:
+#     emhttpd: shcmd: chmod 0777 '/mnt/user/nextcloud'
+# Nextcloud requires its data directory to be 0770 and refuses to start or run
+# occ if it is world-readable ("Environment not properly prepared"), so pointing
+# the datadir at the share root breaks Nextcloud on EVERY reboot - which on this
+# server means daily, since it powers itself off when idle.
+#
+# The reset is not recursive, so a subdirectory keeps its own permissions.
+NC_DATA="/mnt/user/nextcloud/data"
 HTTP_PORT="8080"                    # host port; reverse proxy will front this later
 
 PG_IMAGE="postgres:16-alpine"
@@ -37,6 +48,11 @@ docker network inspect "$NET" >/dev/null 2>&1 || {
 }
 
 mkdir -p "${APPDATA}/nextcloud-db" "${APPDATA}/nextcloud-redis" "${APPDATA}/nextcloud" "${NC_DATA}"
+
+# Re-assert the datadir mode. Harmless if already correct, and it repairs the
+# state after anything has reset it. www-data is uid/gid 33 in the container.
+chown 33:33 "${NC_DATA}" 2>/dev/null || true
+chmod 770   "${NC_DATA}" 2>/dev/null || true
 
 recreate() { # recreate <name>  - remove an existing container so config changes apply
   docker rm -f "$1" >/dev/null 2>&1 && log "removed old container: $1" || true

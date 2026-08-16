@@ -240,3 +240,44 @@ invisible failure D7 exists to prevent. Putting the schedule on `fastpi` makes
 Implement **after** backups are running and verified. Adding power management
 first makes a missing backup ambiguous — broken script, or sleeping box? Prove
 the jobs work on an always-on machine, then introduce the power saving.
+
+
+---
+
+## D11 — Nextcloud's data directory lives in a **subdirectory** of the share
+
+**`/mnt/user/nextcloud/data`, never `/mnt/user/nextcloud` itself.**
+
+Unraid's `emhttpd` re-applies its permission model to every user share root at
+each array start:
+
+```
+emhttpd: shcmd (52): chmod 0777 '/mnt/user/nextcloud'
+emhttpd: shcmd (53): chown nobody:users '/mnt/user/nextcloud'
+```
+
+Nextcloud requires its data directory to be `0770` and refuses to run when it is
+world-readable, failing with:
+
+```
+Your data directory is readable by other people.
+Exception: Environment not properly prepared.
+```
+
+Pointing the datadir at the share root therefore breaks Nextcloud **on every
+boot** — and because this server powers itself off when idle (D10), that means
+daily. The symptom is quiet and nasty: the web UI keeps working, but every `occ`
+command fails, so `nextcloud-cron` dies on each run and **version expiry and
+trash cleanup silently stop**.
+
+The reset is **not recursive**, so a subdirectory keeps its own mode. Verified
+across a real reboot: the share root came back `777 nobody:users` while
+`data/` stayed `770 sshd:sshd` (uid 33 = `www-data` in the container), and `occ`
+worked.
+
+`up.sh` also re-asserts `chown 33:33` and `chmod 770` on the datadir each run,
+so the state repairs itself if anything ever resets it.
+
+**Do not "fix" this by setting `check_data_directory_permissions => false`.**
+That silences the check while leaving the data world-readable, which matters
+once a non-root SMB user exists.
