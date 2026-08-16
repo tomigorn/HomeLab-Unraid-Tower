@@ -42,7 +42,18 @@ SSDS="sdc sdd"                  # data pool mirror members
 # backup run - not a test for "is anything happening". Real usage is detected
 # semantically below (connections, HTTP requests, running jobs).
 # For reference, the Nextcloud install burst measured 5,175,800 sectors.
-SSD_SECTOR_THRESHOLD=100000     # ~50 MiB per check window
+#
+# Measured idle baseline is ~1,230 sectors/min, so ~6,000 per 5-minute window.
+# 50,000 leaves 8x headroom for bursts (cron doing thumbnails, Postgres
+# checkpoints, the hourly snapshot) while still catching sustained transfers.
+SSD_SECTOR_THRESHOLD=50000      # ~25 MiB per check window
+
+# Growth of the user-data dataset itself, in bytes. This is the precise signal
+# for "someone is uploading": it measures the Nextcloud data dataset only, so
+# Postgres and Redis churn in appdata cannot mask or fake it. 1 MiB per window
+# is roughly 3.5 KB/s sustained - far below any real transfer.
+NC_DATASET="data/nextcloud"
+NC_BYTES_THRESHOLD=$(( 1024 * 1024 ))
 
 REQUIRED_IDLE_CHECKS=$(( IDLE_MINUTES / CHECK_INTERVAL_MINUTES ))
 
@@ -128,6 +139,13 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx nextcloud; then
   # A cron run that is still working (first runs take ~90s) should not be cut off.
   docker exec nextcloud pgrep -f "cron.php" >/dev/null 2>&1 && \
     reasons+=("nextcloud cron still running")
+
+  # In-progress chunked uploads leave chunk files under <datadir>/<user>/uploads/.
+  # This catches a transfer that is running right now, independently of whether
+  # anything has been logged or committed to the dataset yet.
+  if compgen -G "/mnt/data/nextcloud/*/uploads/*" >/dev/null 2>&1; then
+    reasons+=("Nextcloud upload in progress (chunks present)")
+  fi
 fi
 
 # 5. Array resync / parity operation ------------------------------------------
@@ -152,6 +170,9 @@ done
 # Field 3 = device, field 6 = sectors read, field 10 = sectors written.
 read_counters() {
   awk '$3 ~ /^(sdb|sdc|sdd|nvme0n1)$/ {print $3"="$6","$10}' /proc/diskstats | tr '\n' ' '
+  # Size of the user-data dataset. Reused via get_val below: with no comma in
+  # the value, the "read" branch returns the whole number.
+  printf 'ncused=%s' "$(zfs get -Hp -o value used "$NC_DATASET" 2>/dev/null || echo 0)"
 }
 now_counters=$(read_counters)
 
@@ -188,6 +209,20 @@ if [[ -n "$prev_counters" ]]; then
     delta=$(( w_now - w_old ))
     (( delta > SSD_SECTOR_THRESHOLD )) && reasons+=("${d} wrote ${delta} sectors")
   done
+
+  # User data actually changed. This is the signal that catches a slow upload
+  # the other two checks miss: Apache logs a request only when it COMPLETES, so
+  # a single large slow PUT produces no log line for its entire duration, and a
+  # transfer under roughly 85 KB/s stays below the device-write threshold. The
+  # dataset grows the whole time regardless.
+  nc_now=$(get_val "$now_counters" ncused r)
+  nc_old=$(get_val "$prev_counters" ncused r)
+  if [[ -n "$nc_old" && "$nc_old" != "0" ]]; then
+    nc_delta=$(( nc_now - nc_old ))
+    (( nc_delta < 0 )) && nc_delta=$(( -nc_delta ))   # deletions count as activity too
+    (( nc_delta > NC_BYTES_THRESHOLD )) && \
+      reasons+=("${NC_DATASET} changed by $(( nc_delta / 1024 )) KiB")
+  fi
 fi
 
 # --------------------------------------------------------------------- decision
