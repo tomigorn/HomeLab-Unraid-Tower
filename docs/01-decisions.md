@@ -313,3 +313,46 @@ being a direct magic packet it has no dependency on fastpi being up. The waker
 serves browsers; the script serves tooling. The Beefy-Waker README already notes
 that the waker is a single point of failure, and keeping an out-of-band path is
 the answer to that.
+
+## D13 — Nextcloud login is Authentik OIDC; local passwords are LAN-only
+
+Nextcloud is published at `https://cloud.holy-grail.ch` (Cloudflare Tunnel →
+Traefik on `fastpi` → `tower:8080`) and authenticates against the Authentik IdP
+on `fastpi`, via the `user_oidc` app.
+
+**Why OIDC and not LDAP.** LDAP was the original plan, but it has no native MFA:
+Authentik's workaround is appending the TOTP code to the password
+(`password;123456`), and the alternative is a bind flow that skips MFA entirely —
+making Nextcloud, which holds all the files, the one service that bypasses an
+otherwise mandatory-MFA IdP. OIDC applies the existing flows unchanged and needs
+no LDAP outpost container on tower. Authentik's own documentation reserves LDAP
+for deployments using server-side encryption with per-user keys, which this is
+not.
+
+**Access is decided in Authentik, not here.** Membership of `cloud-users` grants
+access at all; `cloud-admins` additionally grants Nextcloud administrator rights.
+Both are bound to the Authentik application, so a non-member is refused before
+Nextcloud ever sees them and no account is provisioned. Nextcloud's hard-coded
+`admin` group name is what the scope mapping emits for `cloud-admins` members.
+
+**The local `admin` account stays, as break-glass**, and is the only account not
+backed by Authentik. `user_oidc`'s `allow_multiple_user_backends=0` hides the
+password form, and Traefik returns 403 for both `?direct=1` and `POST /login` on
+the public hostname. So the local password login works **only over the LAN**:
+`http://192.168.1.101:8080/login?direct=1`, or via VPN when remote.
+
+An IP allowlist cannot express this. `cloudflared` reaches Traefik from inside
+the LAN, and a LAN browser opening the public hostname still exits to Cloudflare
+and returns through the same tunnel — so LAN and internet clients are
+indistinguishable at the IP layer on that hostname. Hence a hard deny there plus
+a LAN-only address here.
+
+**Accepted residual risk.** `admin`'s password still authenticates against
+WebDAV and OCS from the internet; those endpoints must stay public for sync
+clients. Nextcloud's built-in brute-force protection (429 after 10 failures in
+30 minutes) covers them, and it sees real client IPs because `trusted_proxies`
+is set. Give `admin` a long random password and enable Nextcloud's own TOTP on
+it.
+
+**Dependency introduced:** Nextcloud login now requires `fastpi` to be up. If
+`fastpi` is down, nobody can log in except via the LAN break-glass path above.

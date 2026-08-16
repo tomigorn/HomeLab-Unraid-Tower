@@ -97,8 +97,10 @@ access. None can be done over SSH by an agent.
 
 ## 🚨 URGENT — Wake-on-LAN stopped working (2026-08-16)
 
-**The server is currently unreachable and will not wake. It needs to be checked
-physically.**
+**Status 2026-08-16 (evening): the server is up and reachable. Two of the three
+hypotheses below are now ruled out with hard evidence — see "Measured wake cycle"
+at the end of this section. The remaining unknown is a several-minute window after
+power-off during which magic packets are ignored.**
 
 WoL worked three times earlier the same day, including once from a ~6 hour
 overnight power-off (wake to array-mounted in 102 s). It then stopped. Evidence:
@@ -190,11 +192,65 @@ baseline above. Specifically check whether the last logged `Wake-on:` value was
 3. Marginal SATA/power on the 6TB stalls the boot — note this drive already
    needed its cables reseated once for exactly this reason.
 
-### ⚠️ Until this is understood, autonomous power-off is not safe here
+### Measured wake cycle (2026-08-16 evening) — two hypotheses eliminated
 
-A headless server in a closet that cannot be woken remotely is worse than one
-that stays powered on. **Consider creating `/boot/config/no-autoshutdown` to
-pause auto power-off** until the cause is found.
+A full cycle was instrumented from `fastpi`. Times below are UTC; tower logs in
+CEST (UTC+2).
+
+| UTC | Event | Source |
+|---|---|---|
+| 20:50:01 | `idle-shutdown` fires, logs `wol before powerdown: pumbg⏎g` | `syslog-previous` |
+| 20:50:24 | last shutdown line (`killall5 -15`), flash unmounts after this | `syslog-previous` |
+| 20:54:10 / 20:56:12 / 20:56:56 | 3 magic packets — **ignored** | waker log |
+| 20:59:22 | 4th packet — **wakes it** | waker log + tcpdump |
+| 21:00:12 | kernel starts (**50 s POST**) | `uptime -s` |
+| 21:01:09 | `emhttpd` up | syslog |
+| 21:01:24 | array mounting | syslog |
+| **21:01:30** | **"Containers started."** | syslog |
+
+**Ruled out — the packets are fine.** Captured on the wire with `tcpdump`: L2
+broadcast to `ff:ff:ff:ff:ff:ff`, UDP/9, 102-byte payload of `6×0xff` followed by
+`60be b417 0de0` repeated exactly 16 times. Textbook-correct, correct MAC.
+
+**Ruled out — WoL was armed.** The mitigation added earlier that logs `Wake-on:`
+immediately before `powerdown` did its job: `pumbg` / `g`. So "the shutdown left
+the NIC unarmed" (hypothesis 1) did not happen on this occasion.
+
+**Ruled out — the boot is not slow.** Magic packet to fully-booted with containers
+running was **128 s**; kernel to containers was **78 s**. That matches the known
+102 s baseline. The "slow SATA link on the 6TB SMR drive stalls the boot"
+explanation (hypothesis 3) does not apply to this failure.
+
+**What is left.** Three packets spanning 20:54→20:57 did nothing; one at 20:59
+worked instantly. So there is a window of roughly 4–9 minutes after `powerdown`
+during which the NIC does not respond. It is **not a fixed delay** — an earlier
+cycle the same day woke from the first packet in ~34 s. Most likely candidates,
+neither yet proven:
+
+- the unlogged tail of shutdown after the flash unmounts (ZFS pool export, disk
+  spin-down, final ACPI power-off) taking variable time, with the busier
+  1-hour-uptime session flushing more than a short one
+- the NIC renegotiating link at low power after the board drops to standby
+
+**Next failure, capture this:** the wattage at the wall during the dead window. A
+draw well above standby means the machine is still winding down and the packets
+are simply arriving too early — which would settle it. Note that on this occasion
+29.2 W was observed and misread as "stuck"; against the measured baseline
+(beefy: boot peak 41 W → ~28 W running → ~0 W off) that reading meant *already
+running*, not stalled.
+
+### ⚠️ Autonomous power-off: kept on, deliberately
+
+A headless server that cannot be woken remotely is worse than one that stays
+powered on, and `/boot/config/no-autoshutdown` exists to pause auto power-off.
+**The owner decided on 2026-08-16 to keep autonomous power-off enabled** rather
+than pause it, accepting the occasional multi-minute wake. Do not create the
+inhibit file without asking.
+
+The practical mitigation is therefore on the `fastpi` side: the waker currently
+sends **one** packet per request, so a packet landing in the dead window is lost
+with nothing to follow it up. Making the waker re-send every 20–30 s for a few
+minutes would have made this entire incident invisible. Not yet implemented.
 
 ### To diagnose, at the machine
 

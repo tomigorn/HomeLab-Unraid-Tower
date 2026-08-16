@@ -220,3 +220,32 @@ Check in this order:
    serving a stale lease.
 5. Attach a monitor. The Unraid console prints the current IP and any boot
    failure directly.
+
+---
+
+## S7 — Locked out of Nextcloud (Authentik or fastpi down)
+
+Nextcloud login goes through Authentik on `fastpi` (see D13). If `fastpi`, the
+Cloudflare tunnel, or Authentik is down, the "Log in with authentik" button
+cannot complete and the password form is hidden.
+
+**Break-glass, from the LAN (or over VPN):**
+
+    http://192.168.1.101:8080/login?direct=1
+
+user `admin`, password in `/boot/config/secrets/nextcloud.env`
+(`NEXTCLOUD_ADMIN_PASSWORD`). That address bypasses Cloudflare and Traefik
+entirely, so it works whenever tower itself is up.
+
+The same URL on the public hostname returns **403** by design — Traefik blocks
+`?direct=1` and `POST /login` there. Do not "fix" that block when locked out;
+use the LAN address.
+
+If the admin password no longer matches the env file (it only seeds the account
+at first install), reset it on tower:
+
+    docker exec -it -u www-data nextcloud php occ user:resetpassword admin
+
+To fall back to local logins entirely, re-enable the password form:
+
+    docker exec -u www-data nextcloud php occ config:app:set user_oidc allow_multiple_user_backends --value=1 --type=string

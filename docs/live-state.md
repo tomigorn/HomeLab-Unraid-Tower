@@ -2,7 +2,7 @@
 
 ## unraid
 version="7.3.2"
-up 1 minute
+up 1 hour, 18 minutes
 
 ## array
 mdNumDisks="1"
@@ -24,9 +24,9 @@ errors: No known data errors
 
 ## datasets
 NAME                                                                                USED  AVAIL
-data                                                                               1.75G  1.75T
-data/appdata                                                                        559M  1.75T
-data/nextcloud                                                                     67.4M  1.75T
+data                                                                               1.83G  1.75T
+data/appdata                                                                        577M  1.75T
+data/nextcloud                                                                      134M  1.75T
 data/system                                                                        1.13G  1.75T
 
 ## disks
@@ -46,9 +46,9 @@ zram0       0B disk
 nvme0n1 119.2G disk ShiJi 128GB M.2-NVMe                  AA00000000035            
 
 ## containers
-nextcloud	Up 42 seconds
-nextcloud-redis	Up 42 seconds
-nextcloud-db	Up 42 seconds (healthy)
+nextcloud	Up About an hour
+nextcloud-redis	Up About an hour
+nextcloud-db	Up About an hour (healthy)
 
 ## scheduled jobs
 backup-local
