@@ -30,9 +30,19 @@ LOG_TAG="idle-shutdown"
 HDD="sdb"                       # WD60EFAX 6TB - SMR, needs special handling
 SSDS="sdc sdd"                  # data pool mirror members
 
-# SSDs see minor housekeeping writes even when nothing is happening, so allow a
-# small delta. The SMR HDD must be at *exactly* zero writes (see below).
-SSD_SECTOR_THRESHOLD=2048       # ~1 MiB of 512-byte sectors per check window
+# The SSDs are NOT a useful idleness signal on their own. Measured on this
+# system with Nextcloud running but nobody using it: ~34,800 sectors (~17 MiB)
+# written every 5 minutes, from Postgres checkpoints, Redis persistence,
+# container logs and Nextcloud's own cron. Docker alone produced ~3,500 sectors
+# before Nextcloud existed. The original 2,048-sector threshold was therefore
+# breached on every single tick, which would have deadlocked this watchdog
+# against nextcloud-cron and silently disabled all power saving.
+#
+# So this is now only a coarse net for genuinely heavy I/O - a large upload, a
+# backup run - not a test for "is anything happening". Real usage is detected
+# semantically below (connections, HTTP requests, running jobs).
+# For reference, the Nextcloud install burst measured 5,175,800 sectors.
+SSD_SECTOR_THRESHOLD=100000     # ~50 MiB per check window
 
 REQUIRED_IDLE_CHECKS=$(( IDLE_MINUTES / CHECK_INTERVAL_MINUTES ))
 
@@ -85,6 +95,28 @@ for proc in rsync rclone restic duplicacy syncoid zfs-send; do
     reasons+=("${proc} running")
   fi
 done
+
+# 4b. Nextcloud in actual use --------------------------------------------------
+# HTTP to the Unraid webGUI is ignored (background browser tabs), but Nextcloud
+# is different: a request there means someone is genuinely using the service,
+# and powering off mid-session would be rude and data-losing on an upload.
+#
+# Excludes our own cron and health probes, which would otherwise mark the
+# server permanently busy since nextcloud-cron fires every 5 minutes.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx nextcloud; then
+  # Look back one CHECK interval, not the whole idle window. The counter below
+  # is what accumulates to 30 minutes; using IDLE_MINUTES here as well would
+  # stack the two, so the machine would need ~55 quiet minutes rather than 30.
+  hits=$(docker logs --since "${CHECK_INTERVAL_MINUTES}m" nextcloud 2>&1 \
+          | grep -E 'HTTP/1\.[01]"' \
+          | grep -vE 'cron\.php|status\.php|/ocs/v2\.php/apps/serverinfo' \
+          | wc -l)
+  (( hits > 0 )) && reasons+=("${hits} Nextcloud request(s) in ${CHECK_INTERVAL_MINUTES}m")
+
+  # A cron run that is still working (first runs take ~90s) should not be cut off.
+  docker exec nextcloud pgrep -f "cron.php" >/dev/null 2>&1 && \
+    reasons+=("nextcloud cron still running")
+fi
 
 # 5. Array resync / parity operation ------------------------------------------
 resync=$(grep -oP 'mdResync="\K[0-9]+' /var/local/emhttp/var.ini 2>/dev/null || echo 0)
