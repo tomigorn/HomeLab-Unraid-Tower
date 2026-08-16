@@ -38,5 +38,15 @@ Both use the `tower` SSH host alias. See `docs/04-security.md` for the SSH setup
 
 ## Status
 
-Build is in progress. `docs/02-build-order.md` is the live checklist — it records
-what is done, what is verified, and what is still pending.
+Build is in progress.
+
+- **`docs/05-todo.md`** — what is still open, ordered by risk. Start here.
+- **`docs/02-build-order.md`** — the live checklist, recording what is done and
+  *how it was verified*.
+
+Working today: ZFS mirror, 6TB array disk, Wake-on-LAN, idle auto power-off,
+Nextcloud with version history, hourly ZFS snapshots, and a local backup to the
+6TB.
+
+Not yet working: **notifications** (so failures are currently silent) and the
+**offsite backup**. No restore has been tested. See the TODO.
