@@ -23,6 +23,32 @@ committing as the wrong person an error rather than a silent mistake.
 | `~/development/private/**` | tomigorn (kept for parity with the Mac layout) |
 | anywhere else | none — commits refuse until set |
 
+## Key comment convention
+
+Comments follow the existing pattern on this machine, so `ls ~/.ssh/*.pub` reads
+as a list of "from here, to there":
+
+```
+|| bazzite @ bazzite-prime -> beefy
+|| bazzite @ bazzite-prime -> fastpi
+|| bazzite @ bazzite-prime -> tomigorn     <- this one
+```
+
+The generic form is `|| user @ computer -> target`. To change it on an existing
+key, note that `ssh-keygen -y` already emits the comment stored in the private
+key — appending another one duplicates it:
+
+```bash
+COMMENT="|| bazzite @ bazzite-prime -> tomigorn"
+ssh-keygen -q -c -C "$COMMENT" -f ~/.ssh/gitHub-Tomigorn        # private key
+printf '%s %s\n' "$(ssh-keygen -y -f ~/.ssh/gitHub-Tomigorn | awk '{print $1" "$2}')" \
+  "$COMMENT" > ~/.ssh/gitHub-Tomigorn.pub                        # public key
+```
+
+⚠️ `allowed_signers-private` embeds the whole public key line, so regenerate it
+whenever the key or its comment changes, or signature verification silently
+stops matching.
+
 ## Keys
 
 **One keypair, used for two distinct GitHub roles:**
