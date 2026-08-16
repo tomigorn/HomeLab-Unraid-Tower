@@ -1,4 +1,10 @@
 {
+    "/boot/config/plugins/user.scripts/scripts/backup-local/script": {
+        "script": "/boot/config/plugins/user.scripts/scripts/backup-local/script",
+        "frequency": "custom",
+        "id": "schedulebackup-local",
+        "custom": "*/30 * * * *"
+    },
     "/boot/config/plugins/user.scripts/scripts/idle-shutdown/script": {
         "script": "/boot/config/plugins/user.scripts/scripts/idle-shutdown/script",
         "frequency": "custom",
