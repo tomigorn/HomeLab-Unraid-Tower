@@ -40,7 +40,50 @@ beefy — so the work is a second instance, not a new design.
    including a bot scanning the tunnel — powers the server on. That both
    defeats the power saving and hands a stranger a power switch.
 
-## Read before starting
+## Status: deployed and verified 2026-08-16
 
-`PROMPT.md` in this directory is a complete brief for continuing this work on
-fastpi, including the facts that were measured rather than assumed.
+Live on fastpi. `Tower-Waker` runs on port 9002 alongside `Beefy-Waker` on 9001.
+
+Verified end to end rather than assumed:
+
+| Check | Result |
+|---|---|
+| `/status`, tower up | `{"up": true}` |
+| `/status`, tower asleep | `{"up": false}` |
+| `/gate`, tower up | `200` - traffic proxied through |
+| `/gate`, tower asleep | `503` + refresh page, **and it woke tower in ~60 s** |
+| Wake page via Traefik | `200`, title `Wake tower` |
+| `beefy-waker` afterwards | still healthy, untouched |
+
+### How it was built
+
+A **self-contained copy** of Beefy-Waker rather than a shared image. The app's
+target env vars were `BEEFY_*`; in the copy they are renamed `TARGET_*`, and the
+user-facing strings say tower. Beefy's own files were not modified, and that was
+checked afterwards: zero renamed references leaked into it.
+
+**Consolidating both onto one generalised image is the obvious follow-up.** It
+was left undone deliberately, because it means editing a service that already
+works.
+
+### Not done: no Nextcloud route exists yet
+
+The wake middleware is defined but **attached to nothing**, because Nextcloud is
+not yet exposed through Traefik. An unattached middleware does nothing and says
+nothing about it, so remember to attach `tower-wake-public` (rate limit, then
+gate) when that route is created.
+
+### `/history` does not work for tower
+
+Beefy's `/history` shells out to `journalctl --list-boots`. Unraid is not
+systemd and has no journal, so that endpoint will fail. The SSH key mounts were
+dropped from the compose file accordingly.
+
+### On fastpi
+
+| Path | What |
+|---|---|
+| `~/Projects/Docker/Tower-Waker/` | the service |
+| `~/Projects/Docker/Traefik/traefik/dynamic/tower-*.yml` | routing |
+| `~/.ssh/config` | `Match host tower exec ... /wake`, so plain `ssh tower` wakes it |
+| `~/HomeLab-Unraid-Tower/` | this repo |

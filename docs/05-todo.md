@@ -75,6 +75,13 @@ access. None can be done over SSH by an agent.
       rebuild the NAS no longer lives solely on one workstation.
 - [x] **Git identity and SSH commit signing** on bazzite; history rewritten so
       all commits are authored by tomigorn and signed.
+- [x] **fastpi set up as a working machine** — SSH commit signing (it had a
+      GitHub key but no signing at all), this repo cloned, its own key
+      authorised on tower, and `deploy.sh` / `fetch.sh` / `wake-tower.sh` all
+      verified working from there.
+- [x] **`allowed_signers` now lists both machines' keys.** Without that, git
+      reports the other machine's commits as `U` - a valid signature from an
+      untrusted signer - so you cannot verify your own history across machines.
 
 ### Deliberately not done, though I could have
 
@@ -298,8 +305,13 @@ Still untested:
 - [ ] Decide: is the Nextcloud **desktop sync client** important? It polls every
       ~30s, which keeps the server permanently awake and roughly halves the
       power saving. Browser + mobile alone would keep the full saving
-- [~] **fastpi + Traefik wake-on-request proxy** (D12) — config written, not
-      yet deployed. See `fastpi/` and `fastpi/PROMPT.md`. Continues on fastpi.
+- [x] **fastpi + Traefik wake-on-request proxy** (D12) — deployed and verified
+      2026-08-16. `Tower-Waker` on port 9002; the gate woke tower from cold in
+      ~60 s. See `fastpi/README.md`.
+      - [ ] Attach `tower-wake-public` to the Nextcloud router **once that route
+            exists**. The middleware is defined but attached to nothing, and an
+            unattached middleware fails silently
+      - [ ] Consolidate Beefy-Waker and Tower-Waker onto one generalised image
 - [ ] fastpi orchestration of scheduled jobs (D10)
 
   Note for whoever writes it: SSH answers about **5 seconds before** the array
