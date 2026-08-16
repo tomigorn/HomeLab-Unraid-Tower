@@ -115,8 +115,10 @@ Still untested:
 
 ## 🔵 Housekeeping
 
-- [ ] **Remove `/boot/config/no-autoshutdown`** — auto power-off is currently
-      inhibited while building. Power saving does not resume until this is gone
+- [x] ~~Remove `/boot/config/no-autoshutdown`~~ — **done 2026-08-16.** Auto
+      power-off is live. The file is a pause switch: recreate it with
+      `ssh tower 'touch /boot/config/no-autoshutdown'` any time you need the
+      server to stay up, and delete it to resume power saving.
 - [ ] Physically remove the unassigned NVMe (D2) — powered, enumerated, doing
       nothing
 - [ ] BIOS: `Restore on AC Power Loss → Power On` (independent of WoL; this is

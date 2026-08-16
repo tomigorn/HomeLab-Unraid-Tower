@@ -107,9 +107,21 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx nextcloud; then
   # Look back one CHECK interval, not the whole idle window. The counter below
   # is what accumulates to 30 minutes; using IDLE_MINUTES here as well would
   # stack the two, so the machine would need ~55 quiet minutes rather than 30.
+  #
+  # Excluded endpoints are *background chatter*, not use:
+  #   cron.php, status.php        - our own jobs and health probes
+  #   notifications, heartbeat,   - an open browser tab polling itself. A tab
+  #   csrftoken, serverinfo         left open on Nextcloud would otherwise keep
+  #                                 the server awake indefinitely, exactly as a
+  #                                 forgotten Unraid webGUI tab would (which is
+  #                                 why HTTP to the webGUI is ignored entirely).
+  #
+  # Everything else still counts: page loads, file listings, and WebDAV under
+  # /remote.php/dav/ - so real browsing, uploads and sync all hold the machine
+  # awake. Measured chatter from one idle tab: ~7 requests per 5 minutes.
   hits=$(docker logs --since "${CHECK_INTERVAL_MINUTES}m" nextcloud 2>&1 \
           | grep -E 'HTTP/1\.[01]"' \
-          | grep -vE 'cron\.php|status\.php|/ocs/v2\.php/apps/serverinfo' \
+          | grep -vE 'cron\.php|status\.php|/apps/serverinfo|/apps/notifications/api|/apps/user_status/api|/csrftoken' \
           | wc -l)
   (( hits > 0 )) && reasons+=("${hits} Nextcloud request(s) in ${CHECK_INTERVAL_MINUTES}m")
 
