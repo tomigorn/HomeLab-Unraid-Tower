@@ -131,6 +131,7 @@ dump_database() {
   fi
 
   # Keep the same number of dumps as daily trees.
+  # shellcheck disable=SC2012  # names are date-stamped and written by this script
   for pat in "nextcloud-" "globals-"; do
     ls -1t "${out}/${pat}"*.sql.gz 2>/dev/null | tail -n +$(( KEEP_DAILY + 1 )) \
       | while read -r old; do rm -f "$old" && log "  pruned old dump: $(basename "$old")"; done
@@ -153,7 +154,15 @@ backup_dataset() {
   local src="${mnt}/.zfs/snapshot/backup-${STAMP}"
   local dest_base="${DEST_ROOT}/${name}"
   local dest="${dest_base}/${TODAY}"
-  local prev; prev="$(ls -1d "${dest_base}"/20*-*-* 2>/dev/null | grep -v "/${TODAY}\$" | tail -1)"
+  # Newest previous dated tree, to hardlink against. Uses a sorted glob rather
+  # than `ls | grep`: this value decides what --link-dest points at, and a
+  # mis-parse would silently turn every nightly run into a full copy.
+  local prev="" d
+  for d in "${dest_base}"/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    [[ -d "$d" ]] || continue
+    [[ "${d##*/}" == "$TODAY" ]] && continue
+    prev="$d"   # glob expands in sorted order, so the last match is the newest
+  done
 
   mkdir -p "$dest_base"
 
@@ -181,25 +190,35 @@ thin_dated() {
   declare -A seen_week=() seen_month=()
   local kept=0 removed=0
 
-  while read -r d; do
-    [[ -d "$d" ]] || continue
-    local day="${d##*/}" ts age
+  # Collect via a sorted glob rather than parsing `ls`. This loop calls `rm -rf`,
+  # so it must never operate on a mis-parsed path.
+  local dirs=() d
+  for d in "${base}"/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    [[ -d "$d" ]] && dirs+=("$d")
+  done
+
+  # Walk newest-first so the newest entry in each bucket is the one kept.
+  # The glob expands ascending, so iterate in reverse.
+  local i day ts age keep k
+  for (( i=${#dirs[@]}-1; i>=0; i-- )); do
+    d="${dirs[i]}"
+    day="${d##*/}"
     ts="$(date -d "$day" +%s 2>/dev/null)" || continue
     age=$(( (now - ts) / 86400 ))
-    local keep=0
+    keep=0
 
     if   (( age <= KEEP_DAILY )); then keep=1
     elif (( age <= KEEP_WEEKLY * 7 )); then
-      local k; k="$(date -d "$day" '+%G-%V')"
+      k="$(date -d "$day" '+%G-%V')"
       [[ -z "${seen_week[$k]:-}" ]] && { seen_week[$k]=1; keep=1; }
     elif (( age <= KEEP_MONTHLY * 31 )); then
-      local k; k="$(date -d "$day" '+%Y%m')"
+      k="$(date -d "$day" '+%Y%m')"
       [[ -z "${seen_month[$k]:-}" ]] && { seen_month[$k]=1; keep=1; }
     fi
 
     if (( keep )); then kept=$(( kept + 1 ))
     else rm -rf "$d" && removed=$(( removed + 1 )); fi
-  done < <(ls -1d "${base}"/20*-*-* 2>/dev/null | sort -r)
+  done
 
   log "  retention: kept ${kept}, removed ${removed}"
 }

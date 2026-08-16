@@ -6,6 +6,80 @@ Last audited against the live system: 2026-08-16.
 
 ---
 
+## Review of 2026-08-16 (unattended)
+
+A full review was run across the live system and every script. Everything the
+docs claim was cross-checked against reality: `startArray=yes`, spin-down 1h on
+disk1, `powersave` governor, Docker data-root `folder`, Nextcloud retention
+`30, 365`, background jobs `cron`, SSH key persisted on the flash. **No drift
+found.**
+
+Health at review time: array `STARTED`, ZFS mirror `ONLINE` with a `mirror-0`
+vdev and zero errors, all three containers up with Postgres healthy, 4 snapshots
+present, no stray `@backup-` snapshots left behind, and the auto power-off pause
+switch correctly absent.
+
+### Fixed during the review
+
+- **`thin_dated` rewritten to use a sorted glob instead of parsing `ls`.** This
+  function calls `rm -rf` on backup trees, so a mis-parsed path is the worst
+  kind of bug it could have. Re-verified against 400 synthetic dated
+  directories: 27 kept, 373 removed, newest and oldest correct, and all 15
+  recent days intact.
+- **`--link-dest` target lookup rewritten** the same way. It decides what each
+  nightly run hardlinks against, and a mis-parse would silently turn every
+  backup into a full copy.
+- **All scripts now pass `shellcheck -S warning` clean** (SC1090/SC1091 sourcing
+  notices and SC2029 client-side-expansion notices excluded as intentional).
+- Verified the `data/nextcloud` dataset does **not** grow on its own — 0 bytes
+  over 3 minutes idle — so the upload-detection check cannot produce false
+  "busy" readings that would block power-off forever.
+
+### ⚠️ Known consequence of the current setup
+
+**Auto power-off is on, and the fastpi orchestration does not exist yet.** So
+scheduled jobs only run while the server happens to be awake. If you do not
+touch the server for a week, there are no backups and no snapshots for that
+week.
+
+This is mostly self-limiting — if nothing is being used, nothing is changing, so
+there is little to back up — but it stops being true the moment you upload
+something and then leave the machine alone. The fix is the fastpi orchestration
+in the Functionality section below.
+
+---
+
+## 🔒 Requires you — I could not do these unattended
+
+These need the webGUI, a password prompt, an external account, or physical
+access. None can be done over SSH by an agent.
+
+| Task | Why I could not | Where |
+|---|---|---|
+| **Notifications** | Needs the GUI and an account/token | Settings → Notification Settings |
+| **Offsite B2 backup** | Needs a Backblaze account and keys | backblaze.com, then `secrets/rclone-b2.env` |
+| **HTTPS for webGUI** | Editing `ident.cfg` and restarting the webGUI unattended risks losing access with nobody there to recover it | Settings → Management Access |
+| **SSH password auth off** | Unraid regenerates `sshd_config` at boot; a mistake locks out remote access while you sleep, and I could not verify recovery | Settings → Management Access |
+| **Strong root password** | GUI only | Users → root |
+| **Non-root SMB user** | GUI only | Users → Add User |
+| **Tailscale** | Plugin install plus an auth key | Apps → Tailscale |
+| **BIOS: Restore on AC Power Loss** | Physical access | BIOS setup |
+| **Remove the unused NVMe** | Physical access | inside the case |
+| **Router: UPnP off, confirm no port forwards** | Router admin | router GUI |
+| **Licence purchase** | Payment | Tools → Registration |
+
+### Deliberately not done, though I could have
+
+- **Monthly scrub and SMART schedules.** Writing and scheduling new jobs
+  unattended at 03:30 without you able to see the first run is how bugs get in.
+  The scripts are straightforward; they belong in a session where the first run
+  can be watched. Note the SMART caveat below before writing them.
+- **`photos` / `media` shares.** Listed in D4, but their purpose is now unclear:
+  Nextcloud owns file access, and empty unused shares are clutter. Worth
+  deciding what they are *for* before creating them.
+
+---
+
 ## 🔴 Blocking — these make other work untrustworthy
 
 ### 1. Notifications — nothing is configured
