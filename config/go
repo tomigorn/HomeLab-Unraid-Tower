@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Mirror syslog to the flash BEFORE emhttp starts, so that a failed boot or an
+# incomplete shutdown is diagnosable afterwards. /var/log/syslog lives in RAM
+# and is destroyed on every boot, which is why the 2026-08-16 wake failure could
+# not be investigated at all.
+#
+# /boot is mounted early and unmounted late, so it captures more of the boot and
+# shutdown sequence than a share on the array would.
+#
+# NOTE: this writes continuously to the USB flash. Volume is small (a few MB a
+# day on an idle server) so wear is not a practical concern at this rate, but
+# remove this block once the wake-on-LAN problem is understood.
+mkdir -p /boot/logs
+echo "*.* -/boot/logs/syslog" > /etc/rsyslog.d/99-flash-mirror.conf
+/etc/rc.d/rc.rsyslogd restart >/dev/null 2>&1
+
+# Start the Management Utility
+/usr/local/sbin/emhttp
