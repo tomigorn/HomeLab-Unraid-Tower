@@ -135,6 +135,40 @@ failed wake.
 - Syslog is now mirrored to `/boot/logs/syslog`, so the next failure has a
   shutdown and boot record to inspect
 
+### First captured shutdown (2026-08-16 12:35) — known-good baseline
+
+Persistent logging worked: Unraid rotates the flash syslog on boot, so the
+previous boot survives as `/boot/logs/syslog-previous`. **This shutdown was
+followed by a successful wake**, so it is a baseline to diff against the next
+failure.
+
+What the teardown does:
+
+```
+rc.inet1: ip link set eth0 nomaster
+bond0 (slave eth0): Releasing backup interface
+rc.inet1: ip link del bond0
+rc.inet1: ip link set lo down
+rc.0:     Sending all processes the SIGTERM signal
+```
+
+**Unraid removes the NIC from `bond0` and deletes the bond, and nothing re-arms
+Wake-on-LAN afterwards.** WoL must be armed at the instant power is cut, so an
+interface teardown is a plausible route to losing it intermittently. The log
+ends at the SIGTERM broadcast, because rsyslog is itself killed there — the
+final moments are still not visible.
+
+**Mitigation applied (unproven):** `idle-shutdown` now runs
+`ethtool -s eth0 wol g` and logs the resulting state immediately before calling
+`powerdown`. Cheap insurance; it does not prove the diagnosis.
+
+**Next failure, do this:** compare `/boot/logs/syslog-previous` against the
+baseline above. Specifically check whether the last logged `Wake-on:` value was
+`g`, and whether the teardown sequence differs.
+
+**Wake attempts since the failure: 4 consecutive successes** (109 s, 102 s,
+102 s, 102 s to a mounted array).
+
 **Still possible, not yet excluded:**
 1. The shutdown does not always complete, leaving the NIC unarmed.
 2. The board intermittently drops NIC standby power.

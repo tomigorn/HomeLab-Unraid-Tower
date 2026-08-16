@@ -250,5 +250,17 @@ if declare -F notify_send >/dev/null; then
 fi
 rm -f "$STATE_FILE"
 
+# Re-arm Wake-on-LAN immediately before powering down.
+#
+# Unraid's shutdown tears the NIC out of bond0 and deletes the bond
+# (rc.inet1: "ip link set eth0 nomaster" / "ip link del bond0"), and nothing
+# re-arms WoL afterwards. WoL must be armed at the moment power is cut, so an
+# interface teardown is a plausible way to lose it. This is cheap insurance, not
+# a proven fix - the wake failure of 2026-08-16 is still under investigation.
+if command -v ethtool >/dev/null 2>&1; then
+  ethtool -s eth0 wol g 2>/dev/null || true
+  log "wol before powerdown: $(ethtool eth0 2>/dev/null | grep -oP 'Wake-on: \K\w+')"
+fi
+
 # powerdown (not poweroff) stops the array, unmounts, and exports the ZFS pool.
 exec /usr/local/sbin/powerdown
