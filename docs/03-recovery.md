@@ -51,18 +51,21 @@ riskiest moment is during recovery.
 
 1. Confirm which disk failed — **by serial**:
    ```
-   zpool status data
+   btrfs device stats /mnt/data
+   btrfs filesystem show /mnt/data
    ```
 2. **Before replacing anything, verify the offsite backup is current.** If the
    surviving disk dies mid-resilver, the offsite copy is what is left.
 3. Stop the array. Physically replace the failed disk.
 4. Assign the new disk to the pool slot in the webGUI, start the array.
-5. Watch the resilver:
+5. Unraid runs `btrfs replace` / a balance; watch it:
    ```
-   zpool status data
+   btrfs replace status /mnt/data
+   btrfs balance status /mnt/data
    ```
-6. Confirm the pool returns to `ONLINE` with a `mirror-0` vdev containing **two**
-   devices. A pool that comes back as a single-device vdev is not a mirror.
+6. Confirm `btrfs filesystem df /mnt/data` shows `RAID1` for Data, Metadata
+   and System and `btrfs filesystem show` lists **two** devices. A `single`
+   profile anywhere means that part is not mirrored.
 
 ---
 
@@ -178,21 +181,22 @@ whenever files are restored outside Nextcloud.
 
 ## S5 — Ransomware / mass deletion, pool itself healthy
 
-ZFS snapshots are read-only and are the fastest path back.
+btrfs snapshots are read-only and are the fastest path back.
 
 1. **Do not** run the backup jobs — they will happily replicate the damage
    offsite. Disable the User Scripts schedules first.
-2. List snapshots:
+2. List snapshots (the name carries the time):
    ```
-   zfs list -t snapshot -r data/photos
+   ls /mnt/data/.snapshots/nextcloud/
    ```
 3. Identify the last good one by timestamp.
-4. Roll back:
+4. Restore single files by copying them out of the snapshot, or roll the whole
+   subvolume back (containers stopped first):
    ```
-   zfs rollback -r data/photos@<snapshot>
+   mv /mnt/data/nextcloud /mnt/data/nextcloud.broken
+   btrfs subvolume snapshot /mnt/data/.snapshots/nextcloud/<snapshot> /mnt/data/nextcloud
    ```
-   ⚠️ `-r` destroys snapshots newer than the target. Confirm the chosen snapshot
-   predates the incident before running it.
+   Delete `nextcloud.broken` only after verifying the restored tree.
 5. Only re-enable backup jobs once the filesystem is verified good.
 
 ---

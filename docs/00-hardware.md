@@ -70,11 +70,11 @@ Measured cycle, 2026-08-16:
 
 | Stage | Result |
 |---|---|
-| Clean shutdown (`/usr/local/sbin/powerdown`) | array stopped, ZFS exported |
+| Clean shutdown (`/usr/local/sbin/powerdown`) | array stopped, pool unmounted |
 | Full power-off confirmed | 45 s of no ping response |
 | Magic packet → SSH reachable | **80 s** |
 | Magic packet → array `STARTED` | **~85 s** |
-| ZFS mirror after cold boot | `ONLINE`, `mirror-0`, 0 errors |
+| Mirror after cold boot | healthy, 0 errors (was ZFS; btrfs RAID1 since 2026-10-19) |
 | Both mounts present | `/mnt/data`, `/mnt/disk1` |
 
 Settings that survived the cold boot, all confirmed:

@@ -37,7 +37,7 @@ reasons:
    has no such concept.
 2. **`/boot/config` is the only location that survives a reboot.** Unraid runs
    from RAM and rebuilds itself from the flash at every boot. Cloning this repo
-   onto the ZFS pool and symlinking from there fails too: the pool is not
+   onto the pool and symlinking from there fails too: the pool is not
    mounted at boot, which is precisely when Unraid reads its config.
 
 So the repo is the source of truth and `deploy.sh` copies from it, while
@@ -74,9 +74,9 @@ Build is in progress.
 - **`docs/02-build-order.md`** — the live checklist, recording what is done and
   *how it was verified*.
 
-Working today: ZFS mirror, 6TB array disk, Wake-on-LAN, idle auto power-off,
-Nextcloud with version history, hourly ZFS snapshots, and a local backup to the
-6TB.
+Working today: btrfs RAID1 mirror, 6TB array disk, Wake-on-LAN, idle auto
+power-off, Nextcloud with version history, hourly btrfs snapshots, and a local
+backup to the 6TB.
 
 Not yet working: **notifications** (so failures are currently silent) and the
 **offsite backup**. See the TODO.

@@ -39,7 +39,8 @@ Legend: `[x]` done and verified · `[~]` done, verification pending · `[ ]` not
 
 ## Phase 1 — Pools
 
-- [x] **Create `data` pool — ZFS mirror, 2× 2TB SATA SSD**
+- [x] **Create `data` pool — mirror, 2× 2TB SATA SSD** (ZFS until 2026-10-19,
+      **btrfs RAID1 since**, see D14 and the entry below)
       Devices: `ata-WDC_WDS200T1R0A-68A4W0_234542800604` +
       `ata-Seagate_IronWolf_ZA2000NM10002-3R1103_70W003LZ`
 
@@ -123,9 +124,33 @@ All exclusive (Secondary storage = none) — see D4.
       and the stack recreated from `up.sh`. The old layer datasets
       (`data/system/<hash>`) were destroyed afterwards.
       *Verified:* `docker info` → `Storage Driver: overlay2`, `Backing Filesystem: xfs`;
-      `mount` shows the image on `/var/lib/docker`; `zfs list -r data` has no
-      `data/system/*` children; no ZFS oops in `dmesg`; `zpool scrub data`
-      0 errors after the change.
+      `mount` shows the image on `/var/lib/docker`; no layer datasets left;
+      no ZFS oops in `dmesg`; scrub 0 errors after the change.
+- [x] **Pool converted ZFS → btrfs RAID1 (2026-10-19)**, from the CLI, the
+      way the GUI does it. Full copy of the pool to fastpi first
+      (`~/backups/tower-pool-2026-10-19/`: rsync of appdata + nextcloud incl.
+      the `*.old-2026-10-18` dirs, `trivy-cache`, `docker.old-folder`, pg_dump
+      + globals, flash cfgs, image tars). Then: containers stopped,
+      `DOCKER_ENABLED="no"` + `emcmd cmdStatus=Apply`, `emcmd cmdStop=Stop`
+      (pool exported), `zpool labelclear` + `wipefs -a` on both partitions
+      (partition table kept — Unraid's own `MBR: 1MiB-aligned` layout),
+      `pools/data.cfg` → `diskFsType="btrfs"`, `diskFsProfile="raid1"`,
+      `diskUUID=""`, `emcmd cmdStart=Start` (pool shows *Unmountable: wrong or
+      no file system*, `fsUnmountableMask` in `var.ini`), then
+      `emcmd "cmdFormat=Format&unmountable_mask=<mask>"` — emhttpd ran
+      `mkfs.btrfs -K -f -d raid1 -m raid1`, mounted, and wrote the new UUID
+      into `data.cfg` itself. Subvolumes created for the three shares,
+      data restored throttled (`rsync --bwlimit=8000`), Docker re-enabled
+      (fresh `docker-xfs.img`, `NOCOW`), images loaded via `pv -L 8m`,
+      `up.sh` + `configure.sh`. Only the live dirs came back; the old
+      `*.old-2026-10-18`, `trivy-cache` and `docker.old-folder-2026-10-19`
+      exist only in the fastpi backup now.
+      *Verified:* `btrfs filesystem df` → Data/Metadata/System all `RAID1`;
+      `btrfs scrub start -B` → `no errors found`; `btrfs device stats` all 0;
+      mount options `compress=zstd:3,discard=async,space_cache=v2`; `occ status`
+      installed 34.0.5, `occ setupchecks` clean; `status.php` through Traefik
+      `installed:true`, `/login` → 302 to user_oidc; Prometheus
+      `probe_success{job="blackbox-tower-nextcloud"}` = 1; no kernel oops.
 - [x] `appdata` confirmed on `data` pool
 - [x] **Nextcloud reinstalled fresh 2026-10-19** (34.0.5, Holy Grail login
       only). Old state renamed to `*.old-2026-10-18` next to the new dirs
@@ -149,11 +174,15 @@ All exclusive (Secondary storage = none) — see D4.
 
 ## Phase 5 — Backups and health
 
-- [ ] ZFS snapshots on the photo dataset (hourly/daily/weekly retention)
+- [x] Hourly read-only btrfs snapshots of `nextcloud` + `appdata`
+      (`pool-snapshot`, GFS thinning). *Verified 2026-10-19:* run by hand,
+      `btrfs subvolume list -r /mnt/data` lists both snapshots.
 - [ ] Nightly local backup `data` → 6TB
 - [ ] Offsite encrypted backup → Backblaze B2
 - [ ] Appdata Backup plugin → `backup` share, nightly
-- [ ] Monthly ZFS scrub
+- [x] Monthly btrfs scrub + hourly device-error check (`pool-scrub`, runs the
+      first awake hour of each month, marker on the flash). *Verified
+      2026-10-19:* first run scrubbed with `no errors found`.
 - [ ] Monthly SMART extended self-test
 - [ ] Notifications configured **and test-fired** — an alert path that has never
       delivered a message is not a working alert path
@@ -187,14 +216,14 @@ See `00-hardware.md` for the measured wake cycle.
 
 - [x] **Wake-on-LAN from full power-off — TESTED END TO END**
       Clean shutdown → confirmed off → magic packet → SSH at 80 s → array
-      `STARTED` at ~85 s → ZFS mirror `ONLINE` with 0 errors, both mounts
+      `STARTED` at ~85 s → mirror healthy with 0 errors, both mounts
       present. `Wake-on: g` re-enabled by the driver on cold boot, so no `go`
       file entry is required.
 
 - [x] **Idle auto power-off watchdog** — `scripts/user-scripts/idle-shutdown/`
       Powers off after **30 minutes** with no SSH/SMB/NFS connections, console
       logins, running data jobs (rsync/rclone/restic/duplicacy/syncoid), array
-      resync, ZFS scrub, SMART self-test, or disk writes. Runs `*/5`, and is
+      resync, btrfs scrub/balance, SMART self-test, or disk writes. Runs `*/5`, and is
       stateful — six consecutive idle checks are required, so a single quiet
       moment never triggers a shutdown.
 

@@ -5,7 +5,7 @@ version of me) does not undo it for a plausible-sounding but wrong reason.
 
 ---
 
-## D1 — `data` pool is a two-device ZFS **mirror**
+## D1 — `data` pool is a two-device **mirror** (btrfs RAID1, see D14)
 
 **Devices:** WD Red SA500 2TB + Seagate IronWolf 125 2TB (both SATA SSD)
 
@@ -16,10 +16,11 @@ Immich's Postgres database, which is exactly as valuable as the photo files it
 indexes. Losing it means losing albums, faces, and metadata even if the JPEGs
 survive. It belongs on redundant storage, not on a single unbranded NVMe.
 
-**Verification requirement:** a two-device ZFS pool must be confirmed to be a
-`mirror`, not a `stripe`. A stripe of two disks looks healthy and performs well
-right up until either disk dies, at which point everything is lost. `zpool status`
-must show a `mirror-0` vdev containing both devices.
+**Verification requirement:** a two-device pool must be confirmed to be a
+mirror, not a stripe. A stripe of two disks looks healthy and performs well
+right up until either disk dies, at which point everything is lost.
+`btrfs filesystem df /mnt/data` must show `RAID1` for Data, Metadata **and**
+System (a `single` anywhere means that part is unprotected).
 
 ---
 
@@ -108,14 +109,15 @@ A ZFS mirror protects against *disk failure*. It does not protect against
 deletion, corruption propagated to both sides, ransomware, or the whole machine
 being lost. Three tiers:
 
-1. **Live copy** — ZFS mirror (`data` pool)
-2. **Local backup** — nightly to the 6TB array disk (rsync, or `zfs send`/syncoid
-   if the 6TB is made ZFS)
+1. **Live copy** — btrfs mirror (`data` pool)
+2. **Local backup** — nightly to the 6TB array disk (rsync from a read-only
+   snapshot)
 3. **Offsite, encrypted** — Backblaze B2 via rclone or Duplicacy
 
-Plus **ZFS snapshots** on the photo dataset (hourly/daily/weekly retention) as an
-undo buffer and a ransomware speed bump — snapshots are read-only and survive
-a compromise of the live filesystem.
+Plus **read-only btrfs snapshots** of the `nextcloud` and `appdata` subvolumes
+(hourly, GFS retention, `pool-snapshot` user script) as an undo buffer and a
+ransomware speed bump — snapshots are read-only and survive a compromise of
+the live filesystem.
 
 Plus **Appdata Backup plugin** nightly to the `backup` share.
 
@@ -126,7 +128,8 @@ object soft limit. A photo library would blow straight through it.
 
 ## D7 — Health monitoring must be noisy
 
-Monthly ZFS scrub + monthly SMART extended self-test, with notifications actually
+Monthly btrfs scrub + hourly `btrfs device stats` check (`pool-scrub` user
+script) + monthly SMART extended self-test, with notifications actually
 configured. Unmonitored redundancy is indistinguishable from no redundancy: the
 mirror silently degrades, and you discover it when the second disk fails.
 
@@ -225,8 +228,8 @@ invisible failure D7 exists to prevent. Putting the schedule on `fastpi` makes
 - **BIOS: PCIe Power On / PME must be ENABLED.**
 - `ethtool eth0` must report `Wake-on: g` after a cold boot. It is currently the
   driver default; if a future update changes that, persist it via `/boot/config/go`.
-- Clean shutdown must use `/usr/local/sbin/powerdown`, which stops the array,
-  unmounts, and exports the ZFS pool. Never `poweroff` directly.
+- Clean shutdown must use `/usr/local/sbin/powerdown`, which stops the array
+  and unmounts the pool. Never `poweroff` directly.
 
 ### Known trade-offs, accepted
 
@@ -366,3 +369,35 @@ it.
 
 **Dependency introduced:** Nextcloud login now requires `fastpi` to be up. If
 `fastpi` is down, nobody can log in except via the LAN break-glass path above.
+
+---
+
+## D14 — `data` pool is **btrfs RAID1**, not ZFS
+
+**Decided 2026-10-19.** The pool was created as a ZFS mirror (D1) and ran that
+way from 2026-08-16. In three days it produced three kernel oopses in the ZFS
+module (2026-10-17 01:17 and 08:58, 2026-10-18 20:07): a NULL dereference in
+the txg sync thread and two general protection faults, each wedging every
+write to the pool until a power-cycle. Writes lost in the wedge left 382 empty
+files in a Nextcloud app and a 500 on every page for eight hours. An 8-pass
+memtest86 was clean, so this is software: ZFS on Unraid is new (7.0+, module
+2.4.3 on kernel 6.18), while a btrfs mirror is Unraid's long-standing pool
+default with the GUI tooling (balance, scrub, device stats, replace) built
+around it.
+
+**How it is set up** — exactly what the GUI Format button does:
+`pools/data.cfg` has `diskFsType="btrfs"`, `diskFsProfile="raid1"`; emhttpd
+formatted with `mkfs.btrfs -K -f -d raid1 -m raid1 /dev/sdd1 /dev/sdc1` and
+mounts with `noatime,space_cache=v2` + `discard=async` (Autotrim) +
+`compress=zstd` (Compression) — both pool settings, not hand-edited options.
+Each share is its own subvolume (`/mnt/data/{appdata,nextcloud,system}`) so
+it can be snapshotted; snapshots live in `/mnt/data/.snapshots/<share>/`.
+Docker keeps its xfs vDisk (D5), which `mount_image` marks `NOCOW` (`chattr +C`).
+
+**Lost on purpose:** ZFS-only properties (per-dataset `used`, `.zfs/snapshot`,
+`zfs send`). Replaced by `btrfs subvolume find-new` (upload detection in
+`idle-shutdown`), `btrfs subvolume snapshot -r` (`pool-snapshot`,
+`backup-local`) and `btrfs scrub` + `btrfs device stats` (`pool-scrub`).
+
+**Check it:** `btrfs filesystem df /mnt/data` (all three `RAID1`),
+`btrfs device stats /mnt/data` (all counters 0), `btrfs scrub status /mnt/data`.

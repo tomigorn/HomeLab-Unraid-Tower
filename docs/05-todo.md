@@ -227,7 +227,7 @@ during which the NIC does not respond. It is **not a fixed delay** — an earlie
 cycle the same day woke from the first packet in ~34 s. Most likely candidates,
 neither yet proven:
 
-- the unlogged tail of shutdown after the flash unmounts (ZFS pool export, disk
+- the unlogged tail of shutdown after the flash unmounts (pool unmount, disk
   spin-down, final ACPI power-off) taking variable time, with the busier
   1-hour-uptime session flushing more than a short one
 - the NIC renegotiating link at low power after the board drops to standby
@@ -297,7 +297,7 @@ delivered a message is not a working alert path.
 ### 2. Offsite backup — tier 3 of 3 does not exist
 
 Backblaze B2 via rclone, encrypted. Currently the only copies of anything are
-the ZFS mirror and the 6TB in the *same machine*. Fire, theft, a lightning
+the btrfs mirror and the 6TB in the *same machine*. Fire, theft, a lightning
 surge, or ransomware that reaches the array takes all of it.
 
 Credential template already committed at `secrets/rclone-b2.env.example`.
@@ -308,7 +308,7 @@ the backups.
 
 ### 3. ~~No restore has ever been tested~~ — **DRILL COMPLETED 2026-08-16**
 
-- [x] restore a file from a ZFS snapshot — valid 500x500 PNG recovered
+- [x] restore a file from a ZFS snapshot — valid 500x500 PNG recovered (pool is btrfs since 2026-10-19; redo with `/mnt/data/.snapshots/`)
 - [x] restore a file from a dated tree on the 6TB
 - [x] all three copies verified **bit-for-bit identical** by md5
 - [x] Postgres dump restored into a scratch container — 0 errors, 102
@@ -344,7 +344,7 @@ Still untested:
 
 ## 🟡 Health monitoring
 
-- [ ] Monthly ZFS scrub (`zpool scrub data`)
+- [x] Monthly btrfs scrub + device-error check (`pool-scrub` user script, 2026-10-19)
 - [ ] Monthly SMART extended self-test
 
   ⚠️ Measure the extended test first. The 6TB reports a **7-minute** extended
