@@ -31,3 +31,9 @@ super.dat
 *.swp
 *.tmp
 .DS_Store
+
+# AI working files
+docs/superpowers/
+.claude/settings.local.json
+CLAUDE.local.md
+AGENTS.md
