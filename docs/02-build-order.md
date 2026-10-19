@@ -111,8 +111,39 @@ All exclusive (Secondary storage = none) — see D4.
 
 ## Phase 4 — Docker
 
-- [ ] Docker enabled with **directory** data-root (see D5)
-- [ ] `appdata` confirmed on `data` pool
+- [x] **Docker on an xfs vDisk** (D5, changed 2026-10-19 from the directory
+      data-root). From the shell: `DOCKER_ENABLED="no"` in
+      `/boot/config/docker.cfg` + `emcmd cmdStatus=Apply` stops Docker and
+      unmounts `/var/lib/docker`; set `DOCKER_IMAGE_TYPE="xfs"`,
+      `DOCKER_IMAGE_FILE="/mnt/user/system/docker/docker-xfs.img"`,
+      `DOCKER_IMAGE_SIZE="40"`, `DOCKER_ENABLED="yes"` + Apply again and emhttpd
+      runs `mount_image` (creates + mkfs + loop-mounts) and `rc.docker start`.
+      Everything in the old data-root is gone: images were re-loaded one at a
+      time (`skopeo copy` to a tar on fastpi, `pv -L 8m | ssh tower-direct docker load`)
+      and the stack recreated from `up.sh`. The old layer datasets
+      (`data/system/<hash>`) were destroyed afterwards.
+      *Verified:* `docker info` → `Storage Driver: overlay2`, `Backing Filesystem: xfs`;
+      `mount` shows the image on `/var/lib/docker`; `zfs list -r data` has no
+      `data/system/*` children; no ZFS oops in `dmesg`; `zpool scrub data`
+      0 errors after the change.
+- [x] `appdata` confirmed on `data` pool
+- [x] **Nextcloud reinstalled fresh 2026-10-19** (34.0.5, Holy Grail login
+      only). Old state renamed to `*.old-2026-10-18` next to the new dirs
+      (`/mnt/user/appdata/nextcloud{,-db,-redis}`, `/mnt/user/nextcloud/data`);
+      DB dump + config.php of the old install are on fastpi
+      (`~/backups/decommissioned/nextcloud-2026-10-18/`). Steps: `up.sh`
+      (pre-copies the code with a throttled rsync, see the script) →
+      `occ maintenance:install` with the postgres container →
+      `configure.sh` (trusted domains, proxy settings, cron mode,
+      `user_oidc` 8.11.0 from the app store, provider `authentik`,
+      `allow_multiple_user_backends=0`, indices, repair).
+      *Verified:* `status.php` installed:true through Traefik;
+      `GET /login` → 302 `/apps/user_oidc/login/1` → 303 to
+      `sso.holy-grail.ch/application/o/authorize`; `/login?direct=1` and
+      `POST /login` → 403 publicly; Prometheus `blackbox-tower-nextcloud`
+      probe_success 1; `occ setupchecks` clean once the first cron run was in.
+      Still to do by hand: first OIDC login as the owner, then
+      `occ user:disable admin` (shell `occ` stays as recovery).
 
 ---
 

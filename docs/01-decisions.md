@@ -87,10 +87,18 @@ makes capacity reasoning simple.
 
 ---
 
-## D5 — Docker uses a **directory** data-root, not a fixed-size vdisk
+## D5 — Docker uses an **xfs vDisk** (`docker-xfs.img`), not a directory
 
-Avoids the classic "docker.img is full" failure mode and the need to guess a size
-up front. A directory grows with the pool and is easier to inspect and back up.
+**Superseded 2026-10-19.** The directory data-root (Docker's `zfs` storage
+driver, one ZFS dataset per image layer under `data/system`) was the original
+choice to avoid the "docker.img is full" failure mode. Three kernel oopses in
+ZFS (2026-10-17/18) correlated with heavy container writes and layer churn on
+that driver; a clean 8-pass memtest ruled out RAM. Docker now runs the standard
+Unraid setup: a 40 GB sparse xfs image at `/mnt/user/system/docker/docker-xfs.img`
+(`DOCKER_IMAGE_TYPE="xfs"` in `docker.cfg`), loop-mounted at `/var/lib/docker`,
+storage driver `overlay2`. The pool sees one file instead of ~80 datasets.
+Watch the image fill level (`df -h /var/lib/docker`); 40 GB is ~15× the
+current use.
 
 ---
 
@@ -335,8 +343,10 @@ Both are bound to the Authentik application, so a non-member is refused before
 Nextcloud ever sees them and no account is provisioned. Nextcloud's hard-coded
 `admin` group name is what the scope mapping emits for `cloud-admins` members.
 
-**The local `admin` account stays, as break-glass**, and is the only account not
-backed by Authentik. `user_oidc`'s `allow_multiple_user_backends=0` hides the
+**The local `admin` account is disabled after the first OIDC login**
+(`occ user:disable admin`, since the 2026-10-19 reinstall); recovery is the
+shell (`occ user:enable admin`, or `occ user:resetpassword`). While it exists it
+is the only account not backed by Authentik. `user_oidc`'s `allow_multiple_user_backends=0` hides the
 password form, and Traefik returns 403 for both `?direct=1` and `POST /login` on
 the public hostname. So the local password login works **only over the LAN**:
 `http://192.168.1.101:8080/login?direct=1`, or via VPN when remote.

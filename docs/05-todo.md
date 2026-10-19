@@ -383,6 +383,16 @@ Still untested:
 
 ## 🔵 Housekeeping
 
+- [ ] **After the 2026-10-19 reinstall:** log in once at
+      `https://cloud.holy-grail.ch` with Holy Grail (user in `cloud-admins`),
+      then `docker exec -u www-data nextcloud php occ user:disable admin`.
+- [ ] Delete the old Nextcloud state once nothing is missed:
+      `/mnt/user/appdata/{nextcloud,nextcloud-db,nextcloud-redis}.old-2026-10-18`,
+      `/mnt/user/nextcloud/data.old-2026-10-18`,
+      `/mnt/data/system/docker.old-folder-2026-10-19` (empty shell of the old
+      Docker directory data-root), `/mnt/user/appdata/trivy-cache`.
+- [ ] Watch the Docker vDisk fill level (`df -h /var/lib/docker`, 40 GB).
+
 - [x] ~~Remove `/boot/config/no-autoshutdown`~~ — **done 2026-08-16.** Auto
       power-off is live. The file is a pause switch: recreate it with
       `ssh tower 'touch /boot/config/no-autoshutdown'` any time you need the
