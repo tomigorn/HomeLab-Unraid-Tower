@@ -183,6 +183,29 @@ All exclusive (Secondary storage = none) — see D4.
       Images loaded the throttled way (skopeo `--override-arch amd64` on fastpi → tar → `pv -L 8m` → `docker load`). `docker load` sets no registry digest, and Cup skips images without one: only `cup` itself (pulled once afterwards, layers already present, nothing downloaded) shows up so far. Others appear after one `docker pull <image>` on tower, which only fetches the manifest while the tag still matches the loaded image.
       *Verified:* `iptables -L DOCKER-USER -n` shows the DROP; from fastpi `curl http://192.168.1.101:8000/api/v3/json` → JSON, from beefy → timeout (dropped); fastpi Cup lists server `tower`. Agent down during a Cup refresh → `Failed to refresh server` in `docker logs Cup`, tower left out until the next refresh.
 
+- [x] **ClamAV (2026-10-19)**: daily scan of new/changed files on the pool, same `scan.sh` as fastpi and beefy (verbatim copy of fastpi's `Docker/antivirus/clamav/scan.sh`; modes, metrics, quarantine format: fastpi's `Docker/antivirus/README.md`).
+
+      | What | Where |
+      |---|---|
+      | Container | `clamav` (`clamav-local:latest`, alpine 3 + ClamAV 1.4.6), runs the freshclam daemon |
+      | Start / stop | `bash /boot/config/scripts/stacks/clamav/up.sh` / `down.sh`; Docker restarts it at array start |
+      | Image | built on fastpi without emulation: `bin/clamav-image.sh` (amd64 rootfs + `apk --arch x86_64`, `pv -L 8m` → `docker import`) |
+      | Scan roots | `/mnt/data/nextcloud` → `/scan/nextcloud`, `/mnt/data/appdata` → `/scan/appdata`; `/` → `/host` (ro, `all` only) |
+      | Quarantine | `/mnt/data/appdata/clamav/quarantine/` + `index.txt` (date, original path, signature) |
+      | State, metrics | `/mnt/data/system/clamav/state/` (`last-run`, `last-infected.txt`, `last-<mode>.log`, `allow.txt`; outside the scan roots, else `new` lists its own temp files), `/mnt/data/appdata/clamav/textfile/clamav.prom` (pulled by fastpi over `ssh tower-direct`) |
+      | Signatures | docker volume `clamav_db` on the vDisk (rebuildable, not in snapshots/backups); first DB copied from fastpi at 8 MB/s |
+      | Daily run | User Script `clamav-scan`, `45 * * * *`, acts on the first awake tick after 03:00 (marker `/boot/config/plugins/user.scripts/clamav-scan.last`); `notify_alert` on hits (exit 1) and errors (exit 2) |
+      | By hand | `docker exec clamav /scan.sh all` (pool + host root, report only), `docker exec clamav /scan.sh /scan/nextcloud/data/<user>/files/<x>`, false positive: `docker exec clamav /scan.sh restore '<file in quarantine>'` |
+      | Tests | `docker run --rm --entrypoint sh -v /boot/config/scripts/stacks/clamav:/src:ro clamav-local:latest /src/tests/test_scan.sh` |
+
+      - `find` mode (ctime/mtime), not `SCAN_BTRFS=1`: `btrfs subvolume find-new` needs `CAP_SYS_ADMIN`, too much for the process that parses hostile files.
+      - `nextcloud` and `appdata` are separate subvolumes: a hit in Nextcloud is copied to the quarantine, not renamed. Nextcloud does not notice: `occ files:scan --all` afterwards.
+      - `idle-shutdown` counts a running `clamscan` as busy.
+      - Rebuild after a `scan.sh` change: `bin/clamav-image.sh`, then `up.sh`.
+
+      *Verified 2026-10-19:* tests `PASS 91 FAIL 0` in the image on tower; first `new` (last 24 h, fresh Nextcloud install) `listed=29777 scanned=29370 infected=0 errors=0` in 14.5 min; EICAR in `/mnt/data/nextcloud/clamav-test/` → path run exit 1, moved to the quarantine, `index.txt` line; EICAR under appdata + User Script → exit 1 and Unraid alert "ClamAV: malware found on tower"; test state wiped, `clamav.prom` back to 0.
+      During the test one bit of the cached `main.cvd` flipped in RAM (`N`→`n`, disk copy fine after `drop_caches`) and clamscan segfaulted twice: more evidence for the RAM suspicion.
+
 ---
 
 ## Phase 5 — Backups and health

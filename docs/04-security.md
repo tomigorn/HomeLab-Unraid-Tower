@@ -78,6 +78,15 @@ Public keys are committed under `config/ssh/`. Private keys never are.
 - [ ] Strong root password (password manager generated, not memorable)
 - [ ] Separate non-root user for SMB access
 
+## Antivirus
+
+| What | When | Alert |
+|---|---|---|
+| ClamAV `scan.sh new` on `/mnt/data/nextcloud` + `/mnt/data/appdata`, hits quarantined | daily, first awake hour after 03:00 (User Script `clamav-scan`) | `notify_alert`; fastpi's Prometheus via `clamav.prom` |
+| `scan.sh all` (pool + host root, report only) | by hand | same |
+
+Setup and paths: `02-build-order.md`, ClamAV.
+
 ---
 
 ## Verification
