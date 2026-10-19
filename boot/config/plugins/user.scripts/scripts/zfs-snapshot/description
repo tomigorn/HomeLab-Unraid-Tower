@@ -1,1 +1,0 @@
-Hourly ZFS snapshots of data/nextcloud and data/appdata with grandfather-father-son thinning: all for 48h, daily for 14d, weekly for 8w, monthly for 1y. Read-only filesystem-level protection that Nextcloud, a sync client, or ransomware cannot delete. Schedule: 0 * * * *

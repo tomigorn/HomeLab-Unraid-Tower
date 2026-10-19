@@ -48,11 +48,12 @@ SSDS="sdc sdd"                  # data pool mirror members
 # checkpoints, the hourly snapshot) while still catching sustained transfers.
 SSD_SECTOR_THRESHOLD=50000      # ~25 MiB per check window
 
-# Growth of the user-data dataset itself, in bytes. This is the precise signal
-# for "someone is uploading": it measures the Nextcloud data dataset only, so
-# Postgres and Redis churn in appdata cannot mask or fake it. 1 MiB per window
-# is roughly 3.5 KB/s sustained - far below any real transfer.
-NC_DATASET="data/nextcloud"
+# Bytes written into the user-data subvolume since the previous check, from
+# `btrfs subvolume find-new`. This is the precise signal for "someone is
+# uploading": it measures the Nextcloud data subvolume only, so Postgres and
+# Redis churn in appdata cannot mask or fake it. 1 MiB per window is roughly
+# 3.5 KB/s sustained - far below any real transfer.
+NC_SUBVOL="/mnt/data/nextcloud"
 NC_BYTES_THRESHOLD=$(( 1024 * 1024 ))
 
 REQUIRED_IDLE_CHECKS=$(( IDLE_MINUTES / CHECK_INTERVAL_MINUTES ))
@@ -101,7 +102,7 @@ smb=$(smbstatus -b 2>/dev/null | grep -cE '^[0-9]+' || true)
 (( smb > 0 )) && reasons+=("${smb} SMB session(s)")
 
 # 4. Long-running data jobs ---------------------------------------------------
-for proc in rsync rclone restic duplicacy syncoid zfs-send; do
+for proc in rsync rclone restic duplicacy; do
   if pgrep -x "$proc" >/dev/null 2>&1; then
     reasons+=("${proc} running")
   fi
@@ -153,9 +154,12 @@ fi
 resync=$(grep -oP 'mdResync="\K[0-9]+' /var/local/emhttp/var.ini 2>/dev/null || echo 0)
 [[ "${resync:-0}" != "0" ]] && reasons+=("array resync in progress")
 
-# 6. ZFS scrub ----------------------------------------------------------------
-if zpool status 2>/dev/null | grep -qi "scrub in progress"; then
-  reasons+=("zfs scrub in progress")
+# 6. btrfs scrub / balance ----------------------------------------------------
+if btrfs scrub status /mnt/data 2>/dev/null | grep -q "running"; then
+  reasons+=("btrfs scrub in progress")
+fi
+if btrfs balance status /mnt/data 2>/dev/null | grep -qi "running"; then
+  reasons+=("btrfs balance in progress")
 fi
 
 # 7. SMART self-test ----------------------------------------------------------
@@ -171,9 +175,9 @@ done
 # Field 3 = device, field 6 = sectors read, field 10 = sectors written.
 read_counters() {
   awk '$3 ~ /^(sdb|sdc|sdd|nvme0n1)$/ {print $3"="$6","$10}' /proc/diskstats | tr '\n' ' '
-  # Size of the user-data dataset. Reused via get_val below: with no comma in
-  # the value, the "read" branch returns the whole number.
-  printf 'ncused=%s' "$(zfs get -Hp -o value used "$NC_DATASET" 2>/dev/null || echo 0)"
+  # Current generation of the user-data subvolume. Reused via get_val below:
+  # with no comma in the value, the "read" branch returns the whole number.
+  printf 'ncgen=%s' "$(btrfs subvolume find-new "$NC_SUBVOL" 18446744073709551615 2>/dev/null | awk '/transid marker/{print $4}')"
 }
 now_counters=$(read_counters)
 
@@ -215,14 +219,13 @@ if [[ -n "$prev_counters" ]]; then
   # the other two checks miss: Apache logs a request only when it COMPLETES, so
   # a single large slow PUT produces no log line for its entire duration, and a
   # transfer under roughly 85 KB/s stays below the device-write threshold. The
-  # dataset grows the whole time regardless.
-  nc_now=$(get_val "$now_counters" ncused r)
-  nc_old=$(get_val "$prev_counters" ncused r)
-  if [[ -n "$nc_old" && "$nc_old" != "0" ]]; then
-    nc_delta=$(( nc_now - nc_old ))
-    (( nc_delta < 0 )) && nc_delta=$(( -nc_delta ))   # deletions count as activity too
+  # subvolume receives new extents the whole time regardless.
+  nc_gen_old=$(get_val "$prev_counters" ncgen r)
+  if [[ -n "$nc_gen_old" && "$nc_gen_old" != "0" ]]; then
+    nc_delta=$(btrfs subvolume find-new "$NC_SUBVOL" "$nc_gen_old" 2>/dev/null \
+                 | awk '$1 == "inode" {s += $7} END {print s + 0}')
     (( nc_delta > NC_BYTES_THRESHOLD )) && \
-      reasons+=("${NC_DATASET} changed by $(( nc_delta / 1024 )) KiB")
+      reasons+=("${NC_SUBVOL} received $(( nc_delta / 1024 )) KiB")
   fi
 fi
 
@@ -264,5 +267,5 @@ if command -v ethtool >/dev/null 2>&1; then
   log "wol before powerdown: $(ethtool eth0 2>/dev/null | grep -oP 'Wake-on: \K\w+')"
 fi
 
-# powerdown (not poweroff) stops the array, unmounts, and exports the ZFS pool.
+# powerdown (not poweroff) stops the array and unmounts the pool cleanly.
 exec /usr/local/sbin/powerdown

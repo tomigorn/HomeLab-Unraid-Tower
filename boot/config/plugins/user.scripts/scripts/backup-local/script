@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# Nightly local backup: ZFS mirror -> 6TB array disk (backup tier 2 of 3, D6).
+# Nightly local backup: btrfs mirror -> 6TB array disk (backup tier 2 of 3, D6).
 #
 # A mirror is not a backup and neither are snapshots: both live in the same
 # pool, in the same machine. This tier survives losing the entire pool.
 #
 # Design notes:
 #
-# * rsync reads from a dedicated ZFS snapshot, not the live filesystem, so the
-#   source cannot change mid-copy. The snapshot is destroyed afterwards.
+# * rsync reads from a dedicated btrfs snapshot, not the live filesystem, so
+#   the source cannot change mid-copy. The snapshot is deleted afterwards.
 #
 # * The database is dumped with pg_dump rather than copied as files. A file
 #   copy of a running Postgres is only crash-consistent; a logical dump is
@@ -29,7 +29,8 @@
 
 set -uo pipefail
 
-SRC_DATASETS=("data/nextcloud" "data/appdata")
+POOL="/mnt/data"
+SRC_SUBVOLS=("nextcloud" "appdata")
 DEST_ROOT="/mnt/disk1/backup"
 DB_CONTAINER="nextcloud-db"
 SECRETS="/boot/config/secrets/nextcloud.env"
@@ -138,20 +139,20 @@ dump_database() {
   done
 }
 
-# ------------------------------------------------------------ dataset -> array
-backup_dataset() {
-  local ds="$1"
-  local name="${ds##*/}"
-  local mnt; mnt="$(zfs get -H -o value mountpoint "$ds" 2>/dev/null)"
-  [[ -d "$mnt" ]] || { warn "no mountpoint for ${ds}"; return; }
+# ---------------------------------------------------------- subvolume -> array
+backup_subvol() {
+  local name="$1"
+  local mnt="${POOL}/${name}"
+  btrfs subvolume show "$mnt" >/dev/null 2>&1 || { warn "not a subvolume: ${mnt}"; return; }
 
-  local snap="${ds}@backup-${STAMP}"
-  if ! zfs snapshot "$snap" 2>/dev/null; then
-    warn "could not snapshot ${ds}"
+  mkdir -p "${POOL}/.snapshots/${name}"
+  local snap="${POOL}/.snapshots/${name}/backup-${STAMP}"
+  if ! btrfs subvolume snapshot -r "$mnt" "$snap" >/dev/null 2>&1; then
+    warn "could not snapshot ${mnt}"
     return
   fi
 
-  local src="${mnt}/.zfs/snapshot/backup-${STAMP}"
+  local src="$snap"
   local dest_base="${DEST_ROOT}/${name}"
   local dest="${dest_base}/${TODAY}"
   # Newest previous dated tree, to hardlink against. Uses a sorted glob rather
@@ -169,20 +170,20 @@ backup_dataset() {
   local link=()
   [[ -n "$prev" ]] && link=(--link-dest="$prev") && log "  hardlinking unchanged files against $(basename "$prev")"
 
-  log "${ds} -> ${dest}"
+  log "${mnt} -> ${dest}"
   local t0=$SECONDS
   if rsync "${RSYNC_OPTS[@]}" "${EXCLUDES[@]}" "${link[@]}" "${src}/" "${dest}/"; then
     log "  ok in $(( SECONDS - t0 ))s, $(du -sh "$dest" 2>/dev/null | cut -f1) apparent"
   else
-    warn "rsync failed for ${ds}"
+    warn "rsync failed for ${mnt}"
   fi
 
-  zfs destroy "$snap" 2>/dev/null || warn "could not destroy ${snap}"
+  btrfs subvolume delete "$snap" >/dev/null 2>&1 || warn "could not delete ${snap}"
   thin_dated "$dest_base"
 }
 
 # ------------------------------------------------- thin dated backup directories
-# Same grandfather-father-son idea as the ZFS snapshots, applied to directory
+# Same grandfather-father-son idea as the btrfs snapshots, applied to directory
 # names. Age-based rather than count-based because the server powers off when
 # idle, so nightly runs are missed unpredictably.
 thin_dated() {
@@ -226,7 +227,7 @@ thin_dated() {
 # ----------------------------------------------------------------------- run
 log "=== local backup start ==="
 dump_database
-for ds in "${SRC_DATASETS[@]}"; do backup_dataset "$ds"; done
+for sv in "${SRC_SUBVOLS[@]}"; do backup_subvol "$sv"; done
 
 elapsed=$(( SECONDS - start_all ))
 free="$(df -h /mnt/disk1 | awk 'NR==2{print $4}')"

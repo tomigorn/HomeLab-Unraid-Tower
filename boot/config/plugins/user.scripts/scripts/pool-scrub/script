@@ -1,0 +1,58 @@
+#!/bin/bash
+#
+# btrfs health for the data pool: a monthly scrub plus a check of the per-device
+# error counters on every run (D7: unmonitored redundancy is no redundancy).
+#
+# Runs hourly and no-ops unless this month's scrub is still missing, because
+# the server powers off when idle (D10) and a fixed monthly time would mostly
+# fall while it is off. The marker lives on the flash so it survives reboots.
+#
+# Schedule: 30 * * * *
+
+set -uo pipefail
+
+POOL="/mnt/data"
+MARKER="/boot/config/plugins/user.scripts/pool-scrub.last"   # YYYY-MM of the last scrub
+STATS_STATE="/boot/config/plugins/user.scripts/pool-scrub.devstats"
+
+[[ -r /boot/config/scripts/lib/notify.sh ]] && . /boot/config/scripts/lib/notify.sh
+log() { echo "$(date '+%F %T') $*"; }
+
+mountpoint -q "$POOL" || { log "${POOL} not mounted - nothing to do"; exit 0; }
+
+# ---------------------------------------------------------- device error counters
+# btrfs keeps write/read/flush/corruption/generation error counts per device;
+# any non-zero value means a device returned bad data or failed an I/O.
+errors="$(btrfs device stats "$POOL" 2>/dev/null | awk '{s += $2} END {print s + 0}')"
+prev="$(cat "$STATS_STATE" 2>/dev/null || echo 0)"
+if (( errors > 0 )) && [[ "$errors" != "$prev" ]]; then
+  log "device errors: ${errors}"
+  btrfs device stats "$POOL" | grep -v ' 0$'
+  declare -F notify_alert >/dev/null && notify_alert "btrfs device errors on ${POOL}" \
+    "$(btrfs device stats "$POOL" | grep -v ' 0$' | tr '\n' ';')  Check: btrfs device stats ${POOL}"
+fi
+echo "$errors" > "$STATS_STATE"
+
+# --------------------------------------------------------------- monthly scrub
+month="$(date '+%Y-%m')"
+if [[ "$(cat "$MARKER" 2>/dev/null)" == "$month" ]]; then
+  exit 0
+fi
+if btrfs scrub status "$POOL" 2>/dev/null | grep -q running; then
+  log "scrub already running"; exit 0
+fi
+
+log "starting scrub for ${month}"
+btrfs scrub start -B "$POOL" >/dev/null 2>&1
+status="$(btrfs scrub status "$POOL" 2>&1)"
+echo "$status"
+if echo "$status" | grep -q "finished" && echo "$status" | grep -qE "Error summary: +no errors found"; then
+  echo "$month" > "$MARKER"
+  log "scrub ok"
+  declare -F notify_ok >/dev/null && notify_ok "btrfs scrub of ${POOL} finished" "no errors found"
+else
+  log "scrub finished with errors or was interrupted"
+  declare -F notify_alert >/dev/null && notify_alert "btrfs scrub of ${POOL} found errors" \
+    "$(echo "$status" | grep -i 'error' | tr '\n' ';')"
+  exit 1
+fi

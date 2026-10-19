@@ -1,1 +1,1 @@
-Powers the server off after 30 minutes with no interactive sessions, SMB clients, running data jobs, array/ZFS/SMART operations, or disk writes. Wake it again with a WoL magic packet. Inhibit with: touch /boot/config/no-autoshutdown
+Powers the server off after 30 minutes with no interactive sessions, SMB clients, running data jobs, array/scrub/SMART operations, or disk writes. Wake it again with a WoL magic packet. Inhibit with: touch /boot/config/no-autoshutdown

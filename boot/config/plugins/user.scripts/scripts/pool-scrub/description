@@ -1,0 +1,1 @@
+Monthly btrfs scrub of the data pool (runs the first hour the server is awake each month) and an hourly check of the per-device error counters; alerts via notify.sh. Schedule: 30 * * * *

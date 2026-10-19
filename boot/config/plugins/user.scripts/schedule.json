@@ -17,10 +17,16 @@
         "id": "schedulenextcloud-cron",
         "custom": "*/5 * * * *"
     },
-    "/boot/config/plugins/user.scripts/scripts/zfs-snapshot/script": {
-        "script": "/boot/config/plugins/user.scripts/scripts/zfs-snapshot/script",
+    "/boot/config/plugins/user.scripts/scripts/pool-snapshot/script": {
+        "script": "/boot/config/plugins/user.scripts/scripts/pool-snapshot/script",
         "frequency": "custom",
-        "id": "schedulezfs-snapshot",
+        "id": "schedulepool-snapshot",
         "custom": "0 * * * *"
+    },
+    "/boot/config/plugins/user.scripts/scripts/pool-scrub/script": {
+        "script": "/boot/config/plugins/user.scripts/scripts/pool-scrub/script",
+        "frequency": "custom",
+        "id": "schedulepool-scrub",
+        "custom": "30 * * * *"
     }
 }

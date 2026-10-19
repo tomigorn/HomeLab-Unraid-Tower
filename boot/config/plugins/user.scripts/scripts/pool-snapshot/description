@@ -1,0 +1,1 @@
+Hourly read-only btrfs snapshots of the nextcloud and appdata subvolumes (/mnt/data/.snapshots) with grandfather-father-son thinning: all for 48h, daily for 14d, weekly for 8w, monthly for 1y. Filesystem-level protection that Nextcloud, a sync client, or ransomware cannot delete. Schedule: 0 * * * *
