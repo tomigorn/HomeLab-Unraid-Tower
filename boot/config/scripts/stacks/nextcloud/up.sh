@@ -36,9 +36,15 @@ PG_IMAGE="postgres:16-alpine"
 REDIS_IMAGE="redis:7-alpine"
 NC_IMAGE="nextcloud:stable-apache"
 
-# Hostnames Nextcloud will accept. Add the public URL here once decided -
-# Nextcloud refuses to serve a domain that is not in this list.
-TRUSTED_DOMAINS="${NEXTCLOUD_TRUSTED_DOMAINS:-} tower tower.galaxus.box 192.168.1.101:${HTTP_PORT} localhost:${HTTP_PORT}"
+# Hostnames Nextcloud will accept. Nextcloud refuses to serve a domain that is
+# not in this list. cloud.holy-grail.ch is the public name (Traefik on fastpi).
+TRUSTED_DOMAINS="${NEXTCLOUD_TRUSTED_DOMAINS:-} cloud.holy-grail.ch tower tower.galaxus.box 192.168.1.101:${HTTP_PORT} localhost:${HTTP_PORT}"
+PUBLIC_URL="https://cloud.holy-grail.ch"
+# Traefik on fastpi reaches Nextcloud from these addresses (tunnel + LAN).
+TRUSTED_PROXIES="172.24.0.1 192.168.1.2"
+# Nextcloud must reach the IdP on fastpi; on this LAN sso.holy-grail.ch resolves
+# through Cloudflare, so pin it to fastpi.
+SSO_HOST="sso.holy-grail.ch:192.168.1.2"
 TRUSTED_DOMAINS="$(echo "$TRUSTED_DOMAINS" | xargs)"   # trim
 
 log() { echo ">>> $*"; }
@@ -56,6 +62,17 @@ chmod 770   "${NC_DATA}" 2>/dev/null || true
 
 recreate() { # recreate <name>  - remove an existing container so config changes apply
   docker rm -f "$1" >/dev/null 2>&1 && log "removed old container: $1" || true
+}
+
+# On an empty html volume the image entrypoint copies ~600 MB of code at full
+# speed. The ZFS pool has crashed under such write bursts (2026-10-17), so lay
+# the code first with a throttled rsync; version.php present makes the
+# entrypoint skip its own copy.
+preseed() {
+  [[ -f "${APPDATA}/nextcloud/version.php" ]] && return 0
+  log "pre-copying Nextcloud code into ${APPDATA}/nextcloud (throttled)"
+  docker run --rm -v "${APPDATA}/nextcloud:/var/www/html" --entrypoint rsync "$NC_IMAGE" \
+    -rlDog --chown www-data:root --bwlimit=8000 /usr/src/nextcloud/ /var/www/html/
 }
 
 # ------------------------------------------------------------------ PostgreSQL
@@ -97,11 +114,13 @@ done
 
 # ------------------------------------------------------------------- Nextcloud
 recreate nextcloud
+preseed
 log "starting nextcloud (${NC_IMAGE})"
 docker run -d \
   --name nextcloud \
   --network "$NET" \
   --restart unless-stopped \
+  --add-host "$SSO_HOST" \
   -p "${HTTP_PORT}:80" \
   -v "${APPDATA}/nextcloud:/var/www/html" \
   -v "${NC_DATA}:/var/www/html/data" \
@@ -114,11 +133,14 @@ docker run -d \
   -e NEXTCLOUD_ADMIN_PASSWORD="$NEXTCLOUD_ADMIN_PASSWORD" \
   -e NEXTCLOUD_TRUSTED_DOMAINS="$TRUSTED_DOMAINS" \
   -e NEXTCLOUD_DATA_DIR="/var/www/html/data" \
+  -e OVERWRITEPROTOCOL="https" \
+  -e OVERWRITECLIURL="$PUBLIC_URL" \
+  -e TRUSTED_PROXIES="$TRUSTED_PROXIES" \
   "$NC_IMAGE" >/dev/null
 
 log "done. containers:"
 docker ps --filter "network=${NET}" --format "  {{.Names}}\t{{.Status}}\t{{.Image}}"
 echo
 log "Nextcloud will take a minute to initialise on first run."
-log "Then: http://tower:${HTTP_PORT}"
-log "Credentials: ssh tower 'cat /boot/config/secrets/nextcloud.env'"
+log "Then: ${PUBLIC_URL} (Holy Grail login) or http://192.168.1.101:${HTTP_PORT}/login?direct=1"
+log "First install: bash /boot/config/scripts/stacks/nextcloud/configure.sh"
