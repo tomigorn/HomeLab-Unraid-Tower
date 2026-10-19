@@ -19,6 +19,14 @@ See D8 in `01-decisions.md` for the decision record.
 4. **Offsite backup credentials are not stored only on the NAS.** Keep a copy in
    a password manager, or an attacker who owns the NAS owns the backups too.
 
+## LAN-published ports
+
+| Port | Service | Who may connect | Enforced by |
+|---|---|---|---|
+| 8000 | Cup agent (no auth: full image inventory) | fastpi `192.168.1.2` only | `DOCKER-USER` DROP from `stacks/cup-agent/firewall.sh`, run by `go` at boot and by `up.sh` |
+
+Check: `iptables -S DOCKER-USER` → `-A DOCKER-USER ! -s 192.168.1.2/32 -i br0 -p tcp -m tcp --dport 8000 -j DROP`
+
 ---
 
 ## Remote admin: Tailscale only

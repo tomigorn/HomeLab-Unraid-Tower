@@ -170,6 +170,19 @@ All exclusive (Secondary storage = none) — see D4.
       Still to do by hand: first OIDC login as the owner, then
       `occ user:disable admin` (shell `occ` stays as recovery).
 
+- [x] **Cup agent (2026-10-19)**: tower's images in fastpi's Cup (`https://cup.holy-grail.ch`, fastpi `Docker/Cup/cup.json` → `"tower": "http://192.168.1.101:8000"`). Same layout as beefy's `Cup-Agent`.
+
+      | What | Where |
+      |---|---|
+      | Containers | `cup-socket-proxy-ro` (read-only, `POST=0`) → `cup-socket-proxy-unix` (socat) → `cup-agent` (`ghcr.io/sergi0g/cup:v3.5.1`, `"agent": true`) |
+      | Config | `/boot/config/scripts/stacks/cup-agent/cup.json` (mounted read-only) |
+      | Start / stop | `bash /boot/config/scripts/stacks/cup-agent/up.sh` / `down.sh`; Docker restarts them at array start (`--restart unless-stopped`) |
+      | Port | `192.168.1.101:8000`, fastpi only |
+      | Firewall | `firewall.sh`, run from `go` before Docker starts and from `up.sh`: `iptables -I DOCKER-USER -i br0 ! -s 192.168.1.2/32 -p tcp --dport 8000 -j DROP` (idempotent) |
+
+      Images loaded the throttled way (skopeo `--override-arch amd64` on fastpi → tar → `pv -L 8m` → `docker load`). `docker load` sets no registry digest, and Cup skips images without one: only `cup` itself (pulled once afterwards, layers already present, nothing downloaded) shows up so far. Others appear after one `docker pull <image>` on tower, which only fetches the manifest while the tag still matches the loaded image.
+      *Verified:* `iptables -L DOCKER-USER -n` shows the DROP; from fastpi `curl http://192.168.1.101:8000/api/v3/json` → JSON, from beefy → timeout (dropped); fastpi Cup lists server `tower`. Agent down during a Cup refresh → `Failed to refresh server` in `docker logs Cup`, tower left out until the next refresh.
+
 ---
 
 ## Phase 5 — Backups and health

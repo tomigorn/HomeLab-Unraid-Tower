@@ -15,6 +15,7 @@ lands there — no translation table, no mapping buried in a script:
 boot/config/go                                     -> /boot/config/go
 boot/config/scripts/lib/notify.sh                  -> /boot/config/scripts/lib/notify.sh
 boot/config/scripts/stacks/nextcloud/up.sh         -> /boot/config/scripts/stacks/nextcloud/up.sh
+boot/config/scripts/stacks/cup-agent/               -> /boot/config/scripts/stacks/cup-agent/
 boot/config/plugins/user.scripts/scripts/<job>/    -> same path on the server
 boot/config/shares/*.cfg                           -> /boot/config/shares/
 ```
