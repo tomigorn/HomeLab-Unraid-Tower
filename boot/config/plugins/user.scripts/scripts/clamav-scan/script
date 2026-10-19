@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# Daily ClamAV scan of new and changed files on the data pool (nextcloud +
+# appdata); infected files go to /mnt/data/appdata/clamav/quarantine.
+#
+# Runs hourly and acts once per day on the first awake tick after 03:00, because
+# the server powers off when idle (D10). The marker lives on the flash.
+#
+# By hand:  docker exec clamav /scan.sh all                              everything + host root, report only
+#           docker exec clamav /scan.sh /scan/nextcloud/data/<user>/files/<x>   one file or folder
+#           docker exec clamav /scan.sh restore '<file in quarantine>'          false positive back
+#
+# Schedule: 45 * * * *
+
+set -uo pipefail
+
+MARKER="/boot/config/plugins/user.scripts/clamav-scan.last"   # YYYY-MM-DD of the last run
+STATE="/mnt/data/system/clamav/state"
+FROM_HOUR=3
+
+[[ -r /boot/config/scripts/lib/notify.sh ]] && . /boot/config/scripts/lib/notify.sh
+log() { echo "$(date '+%F %T') $*"; }
+
+today="$(date '+%F')"
+(( 10#$(date '+%H') >= FROM_HOUR )) || exit 0
+[[ "$(cat "$MARKER" 2>/dev/null)" == "$today" ]] && exit 0
+mountpoint -q /mnt/data || { log "/mnt/data not mounted - nothing to do"; exit 0; }
+
+echo "$today" > "$MARKER"
+out="$(docker exec clamav /scan.sh new 2>&1)"
+rc=$?
+log "$(echo "$out" | tail -n 1)"
+
+case $rc in
+  0) ;;
+  1) declare -F notify_alert >/dev/null && notify_alert "ClamAV: malware found on tower" \
+       "$(tr '\t' ' ' < "${STATE}/last-infected.txt" | tr '\n' ';')  Quarantine: /mnt/data/appdata/clamav/quarantine/index.txt" ;;
+  *) declare -F notify_alert >/dev/null && notify_alert "ClamAV scan FAILED on tower (rc=${rc})" \
+       "$(echo "$out" | grep -E '^(ERROR|WARNING)|Error' | tail -n 5 | tr '\n' ';')$(echo "$out" | tail -n 1)" ;;
+esac
+exit $rc

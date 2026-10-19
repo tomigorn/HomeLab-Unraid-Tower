@@ -1,0 +1,1 @@
+Daily ClamAV scan of new/changed files on the data pool (first awake hour after 03:00), quarantines hits, alerts via notify.sh. Schedule: 45 * * * *

@@ -28,5 +28,11 @@
         "frequency": "custom",
         "id": "schedulepool-scrub",
         "custom": "30 * * * *"
+    },
+    "/boot/config/plugins/user.scripts/scripts/clamav-scan/script": {
+        "script": "/boot/config/plugins/user.scripts/scripts/clamav-scan/script",
+        "frequency": "custom",
+        "id": "scheduleclamav-scan",
+        "custom": "45 * * * *"
     }
 }

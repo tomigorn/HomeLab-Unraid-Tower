@@ -102,7 +102,7 @@ smb=$(smbstatus -b 2>/dev/null | grep -cE '^[0-9]+' || true)
 (( smb > 0 )) && reasons+=("${smb} SMB session(s)")
 
 # 4. Long-running data jobs ---------------------------------------------------
-for proc in rsync rclone restic duplicacy; do
+for proc in rsync rclone restic duplicacy clamscan; do
   if pgrep -x "$proc" >/dev/null 2>&1; then
     reasons+=("${proc} running")
   fi
