@@ -14,7 +14,7 @@
 #   /boot is VFAT and cannot represent a symlink at all - `ln -s` there fails
 #   with "Operation not permitted". And /boot/config is the ONLY location that
 #   survives an Unraid reboot, since the OS runs from RAM. Cloning this repo
-#   onto the ZFS pool and symlinking from there would not work either: the pool
+#   onto the pool and symlinking from there would not work either: the pool
 #   is not mounted at boot, which is exactly when Unraid reads its config.
 #
 # Usage:

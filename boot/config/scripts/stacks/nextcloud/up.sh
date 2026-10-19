@@ -4,7 +4,7 @@
 #
 # Unraid ships no `docker compose`, so this is plain `docker run`. It is
 # idempotent: re-running recreates the containers from these definitions. All
-# state lives in bind mounts on the ZFS pool, so recreating a container loses
+# state lives in bind mounts on the pool, so recreating a container loses
 # nothing - that is the point. To change a setting, edit here and re-run.
 #
 # Run ON THE SERVER:  /boot/config/scripts/stacks/nextcloud/up.sh
@@ -65,7 +65,7 @@ recreate() { # recreate <name>  - remove an existing container so config changes
 }
 
 # On an empty html volume the image entrypoint copies ~600 MB of code at full
-# speed. The ZFS pool has crashed under such write bursts (2026-10-17), so lay
+# speed. The old ZFS pool crashed under such write bursts (2026-10-17), so lay
 # the code first with a throttled rsync; version.php present makes the
 # entrypoint skip its own copy.
 preseed() {

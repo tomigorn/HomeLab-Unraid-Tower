@@ -2,33 +2,23 @@
 
 ## unraid
 version="7.3.2"
-up 56 minutes
+up 4 hours, 18 minutes
 
 ## array
 mdNumDisks="1"
 mdState="STARTED"
 fsState="Started"
 
-## zfs
-  pool: data
- state: ONLINE
-  scan: scrub repaired 0B in 00:00:14 with 0 errors on Mon Oct 19 10:10:03 2026
-config:
+## pool
+Data, RAID1: total=43.00GiB, used=40.47GiB
+System, RAID1: total=32.00MiB, used=16.00KiB
+Metadata, RAID1: total=1.00GiB, used=30.80MiB
+GlobalReserve, single: total=5.75MiB, used=16.00KiB
 
-	NAME        STATE     READ WRITE CKSUM
-	data        ONLINE       0     0     0
-	  mirror-0  ONLINE       0     0     0
-	    sdd1    ONLINE       0     0     0
-	    sdc1    ONLINE       0     0     0
-
-errors: No known data errors
-
-## datasets
-NAME             USED  AVAIL
-data            3.71G  1.75T
-data/appdata    1.85G  1.75T
-data/nextcloud   275M  1.75T
-data/system     1.58G  1.75T
+## subvolumes
+ID 256 gen 41 top level 5 path appdata
+ID 257 gen 39 top level 5 path nextcloud
+ID 258 gen 41 top level 5 path system
 
 ## disks
 NAME      SIZE TYPE MODEL                                 SERIAL                   FSTYPE
@@ -40,15 +30,15 @@ sda      14.8G disk Silicon-Power16G                      P200269507010A7E92DDC0
 sdb       5.5T disk WDC WD60EFAX-68JH4N0                  WD-WX42D80C4RAP          
 `-sdb1    5.5T part                                                                xfs
 sdc       1.8T disk WDC WDS200T1R0A-68A4W0                234542800604             
-`-sdc1    1.8T part                                                                zfs_member
+`-sdc1    1.8T part                                                                btrfs
 sdd       1.8T disk Seagate IronWolf ZA2000NM10002-3R1103 70W003LZ                 
-`-sdd1    1.8T part                                                                zfs_member
+`-sdd1    1.8T part                                                                btrfs
 md1p1     5.5T md                                                                  
 zram0       0B disk                                                                
 nvme0n1 119.2G disk ShiJi 128GB M.2-NVMe                  AA00000000035            
 
 ## containers
-nextcloud	Up 5 minutes
+nextcloud	Up 7 minutes
 nextcloud-redis	Up 7 minutes
 nextcloud-db	Up 7 minutes (healthy)
 
@@ -56,7 +46,8 @@ nextcloud-db	Up 7 minutes (healthy)
 backup-local
 idle-shutdown
 nextcloud-cron
-zfs-snapshot
+pool-snapshot
+pool-scrub
 
 ## plugins
 community.applications.plg
