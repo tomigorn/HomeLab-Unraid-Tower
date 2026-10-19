@@ -15,5 +15,8 @@ mkdir -p /boot/logs
 echo "*.* -/boot/logs/syslog" > /etc/rsyslog.d/99-flash-mirror.conf
 /etc/rc.d/rc.rsyslogd restart >/dev/null 2>&1
 
+# Cup agent firewall, before emhttp starts Docker and Docker restarts the agent.
+bash /boot/config/scripts/stacks/cup-agent/firewall.sh
+
 # Start the Management Utility
 /usr/local/sbin/emhttp
