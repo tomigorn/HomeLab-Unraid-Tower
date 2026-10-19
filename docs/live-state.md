@@ -2,7 +2,7 @@
 
 ## unraid
 version="7.3.2"
-up 1 hour, 18 minutes
+up 56 minutes
 
 ## array
 mdNumDisks="1"
@@ -12,6 +12,7 @@ fsState="Started"
 ## zfs
   pool: data
  state: ONLINE
+  scan: scrub repaired 0B in 00:00:14 with 0 errors on Mon Oct 19 10:10:03 2026
 config:
 
 	NAME        STATE     READ WRITE CKSUM
@@ -23,16 +24,17 @@ config:
 errors: No known data errors
 
 ## datasets
-NAME                                                                                USED  AVAIL
-data                                                                               1.83G  1.75T
-data/appdata                                                                        577M  1.75T
-data/nextcloud                                                                      134M  1.75T
-data/system                                                                        1.13G  1.75T
+NAME             USED  AVAIL
+data            3.71G  1.75T
+data/appdata    1.85G  1.75T
+data/nextcloud   275M  1.75T
+data/system     1.58G  1.75T
 
 ## disks
 NAME      SIZE TYPE MODEL                                 SERIAL                   FSTYPE
 loop0   736.1M loop                                                                squashfs
 loop1   308.3M loop                                                                squashfs
+loop2      40G loop                                                                xfs
 sda      14.8G disk Silicon-Power16G                      P200269507010A7E92DDC045 
 `-sda1   14.8G part                                                                vfat
 sdb       5.5T disk WDC WD60EFAX-68JH4N0                  WD-WX42D80C4RAP          
@@ -46,9 +48,9 @@ zram0       0B disk
 nvme0n1 119.2G disk ShiJi 128GB M.2-NVMe                  AA00000000035            
 
 ## containers
-nextcloud	Up About an hour
-nextcloud-redis	Up About an hour
-nextcloud-db	Up About an hour (healthy)
+nextcloud	Up 5 minutes
+nextcloud-redis	Up 7 minutes
+nextcloud-db	Up 7 minutes (healthy)
 
 ## scheduled jobs
 backup-local

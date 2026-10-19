@@ -132,6 +132,7 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx nextcloud; then
   # awake. Measured chatter from one idle tab: ~7 requests per 5 minutes.
   hits=$(docker logs --since "${CHECK_INTERVAL_MINUTES}m" nextcloud 2>&1 \
           | grep -E 'HTTP/1\.[01]"' \
+          | grep -v 'Blackbox Exporter' \
           | grep -vE 'cron\.php|status\.php|/apps/serverinfo|/apps/notifications/api|/apps/user_status/api|/csrftoken' \
           | wc -l)
   (( hits > 0 )) && reasons+=("${hits} Nextcloud request(s) in ${CHECK_INTERVAL_MINUTES}m")
@@ -256,7 +257,8 @@ rm -f "$STATE_FILE"
 # (rc.inet1: "ip link set eth0 nomaster" / "ip link del bond0"), and nothing
 # re-arms WoL afterwards. WoL must be armed at the moment power is cut, so an
 # interface teardown is a plausible way to lose it. This is cheap insurance, not
-# a proven fix - the wake failure of 2026-08-16 is still under investigation.
+# a proven fix. (The 2026-08-16 wake failure never recurred: 5/5 WoL wakes on
+# 2026-10-14 after powerdown worked, with this re-arm in place.)
 if command -v ethtool >/dev/null 2>&1; then
   ethtool -s eth0 wol g 2>/dev/null || true
   log "wol before powerdown: $(ethtool eth0 2>/dev/null | grep -oP 'Wake-on: \K\w+')"
